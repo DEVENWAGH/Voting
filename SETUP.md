@@ -24,7 +24,7 @@ npm --version   # Should be 8 or higher
 
 ```bash
 git clone <repository-url>
-cd VotingDApp
+cd BlockVote
 ```
 
 ### 2. Install Dependencies
@@ -348,7 +348,7 @@ npm run deploy:local
 ## Project Structure
 
 ```
-VotingDApp/
+BlockVote/
 ├── contracts/              # Smart contracts
 │   └── EnhancedVoting.sol
 ├── scripts/               # Deployment scripts

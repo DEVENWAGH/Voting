@@ -37,7 +37,7 @@ export default function Navbar() {
       {/* Logo */}
       <Link href="/" className="flex items-center gap-2">
         <Vote className="text-green-400" size={24} />
-        <span className="text-xl font-bold text-green-400">VotingDApp</span>
+        <span className="text-xl font-bold text-green-400">BlockVote</span>
       </Link>
 
       {/* Nav links */}

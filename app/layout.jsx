@@ -3,7 +3,7 @@ import { WalletProvider } from '@/context/WalletContext';
 import Navbar from '@/components/Navbar';
 
 export const metadata = {
-  title: 'VotingDApp — Decentralized Voting',
+  title: 'BlockVote — Decentralized Voting',
   description: 'Secure, transparent blockchain-based elections powered by Ethereum',
 };
 
