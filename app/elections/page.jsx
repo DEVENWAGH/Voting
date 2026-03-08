@@ -8,7 +8,7 @@ import { List, Loader2, PlusCircle, Calendar, User } from 'lucide-react';
 import Link from 'next/link';
 
 export default function ElectionsPage() {
-  const { contract, account } = useWallet();
+  const { readContract, account } = useWallet();
   const router = useRouter();
   const [elections, setElections] = useState([]);
   const [loading, setLoading] = useState(true);
@@ -20,14 +20,14 @@ export default function ElectionsPage() {
       return;
     }
     loadElections();
-  }, [contract, account]);
+  }, [readContract, account]);
 
   const loadElections = async () => {
-    if (!contract) return;
+    if (!readContract) { setLoading(false); return; }
     try {
       setLoading(true);
       setError('');
-      const raw = await contract.getAllElections();
+      const raw = await readContract.getAllElections();
       setElections(raw.map(serializeElection));
     } catch (err) {
       console.error(err);

@@ -1,3 +1,9 @@
+import "@nomicfoundation/hardhat-ethers";
+import "@nomicfoundation/hardhat-chai-matchers";
+import "@nomicfoundation/hardhat-network-helpers";
+import "@nomicfoundation/hardhat-verify";
+import "hardhat-gas-reporter";
+import "solidity-coverage";
 import dotenv from "dotenv";
 dotenv.config();
 
@@ -19,13 +25,11 @@ export default {
   networks: {
     // Local Hardhat node
     localhost: {
-      type: "http",
       url: "http://127.0.0.1:8545",
       chainId: 31337,
     },
     // Sepolia testnet
     sepolia: {
-      type: "http",
       url: SEPOLIA_RPC_URL,
       accounts: [PRIVATE_KEY],
       chainId: 11155111,

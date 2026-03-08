@@ -14,7 +14,7 @@ import Link from 'next/link';
 export default function ElectionDetailPage() {
   const { id } = useParams();
   const router = useRouter();
-  const { contract, account } = useWallet();
+  const { contract, readContract, account } = useWallet();
 
   const [election, setElection] = useState(null);
   const [candidates, setCandidates] = useState([]);
@@ -31,31 +31,33 @@ export default function ElectionDetailPage() {
   useEffect(() => {
     if (!account) { router.replace('/connect-wallet'); return; }
     loadData();
-  }, [contract, account, id]);
+  }, [readContract, account, id]);
 
   const loadData = async () => {
-    if (!contract || !id) return;
+    if (!readContract || !id) return;
     try {
       setLoading(true);
       setError('');
 
-      const electionRaw = await contract.getElection(id);
+      const electionRaw = await readContract.getElection(id);
       const e = serializeElection(electionRaw);
       setElection(e);
 
-      const cands = await contract.getCandidates(id);
+      const cands = await readContract.getCandidates(id);
       setCandidates(cands.map(serializeCandidate));
 
-      const voted = await contract.hasVoted(id, account);
-      setHasVoted(voted);
+      if (account) {
+        const voted = await readContract.hasVoted(id, account);
+        setHasVoted(voted);
 
-      const voter = await contract.voters(account);
-      setIsRegistered(voter.isRegistered);
+        const voter = await readContract.voters(account);
+        setIsRegistered(voter.isRegistered);
+      }
 
       if (e.phase === 2) {
-        const resRaw = await contract.getElectionResults(id);
+        const resRaw = await readContract.getElectionResults(id);
         setResults(resRaw.map(serializeCandidate));
-        const winnerRaw = await contract.getWinner(id);
+        const winnerRaw = await readContract.getWinner(id);
         setWinner(serializeCandidate(winnerRaw));
       }
     } catch (err) {

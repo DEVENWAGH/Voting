@@ -5,7 +5,7 @@ import { ethers } from 'ethers';
 import contractABI from '@/lib/contracts/EnhancedVoting.json';
 
 // ⚠️ Update this after deploying EnhancedVoting.sol
-export const CONTRACT_ADDRESS = process.env.NEXT_PUBLIC_CONTRACT_ADDRESS || '0x006eCf2170a627EBF57378875b150C0Ea5D49006';
+export const CONTRACT_ADDRESS = process.env.NEXT_PUBLIC_CONTRACT_ADDRESS || '0xe7f1725E7734CE288F8367e1Bb143E90bb3F0512';
 
 const WalletContext = createContext(null);
 
@@ -14,9 +14,22 @@ export function WalletProvider({ children }) {
   const [signer, setSigner] = useState(null);
   const [account, setAccount] = useState('');
   const [contract, setContract] = useState(null);
+  const [readContract, setReadContract] = useState(null);
   const [isAdmin, setIsAdmin] = useState(false);
   const [isConnecting, setIsConnecting] = useState(false);
   const [error, setError] = useState('');
+
+  // Initialize read-only contract directly via JsonRpcProvider (no wallet needed)
+  useEffect(() => {
+    const rpcUrl = process.env.NEXT_PUBLIC_RPC_URL || 'http://127.0.0.1:8545';
+    try {
+      const rpcProvider = new ethers.JsonRpcProvider(rpcUrl);
+      const rc = new ethers.Contract(CONTRACT_ADDRESS, contractABI.abi, rpcProvider);
+      setReadContract(rc);
+    } catch (err) {
+      console.warn('Read contract init failed:', err.message);
+    }
+  }, []);
 
   // Ref so event listeners always see latest account without stale closure
   const accountRef = useRef('');
@@ -161,7 +174,7 @@ export function WalletProvider({ children }) {
 
   return (
     <WalletContext.Provider
-      value={{ provider, signer, account, contract, isAdmin, isConnecting, error, connect, disconnect }}
+      value={{ provider, signer, account, contract, readContract, isAdmin, isConnecting, error, connect, disconnect }}
     >
       {children}
     </WalletContext.Provider>

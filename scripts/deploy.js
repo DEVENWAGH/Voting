@@ -1,5 +1,5 @@
 import hre from "hardhat";
-import { writeFileSync, mkdirSync, existsSync } from "fs";
+import { writeFileSync, readFileSync, mkdirSync, existsSync } from "fs";
 import { resolve, dirname } from "path";
 import { fileURLToPath } from "url";
 
@@ -39,9 +39,24 @@ async function main() {
   );
   console.log("   ABI saved to lib/contracts/EnhancedVoting.json");
 
-  // Print .env.local update instructions
-  console.log("\n📝 Update your .env.local:");
-  console.log(`   NEXT_PUBLIC_CONTRACT_ADDRESS=${address}`);
+  // Auto-update .env with the new contract address
+  const envPath = resolve(__dirname, "../.env");
+  if (existsSync(envPath)) {
+    let envContent = readFileSync(envPath, "utf8");
+    if (envContent.includes("NEXT_PUBLIC_CONTRACT_ADDRESS=")) {
+      envContent = envContent.replace(
+        /NEXT_PUBLIC_CONTRACT_ADDRESS=.*/,
+        `NEXT_PUBLIC_CONTRACT_ADDRESS=${address}`
+      );
+    } else {
+      envContent += `\nNEXT_PUBLIC_CONTRACT_ADDRESS=${address}`;
+    }
+    writeFileSync(envPath, envContent);
+    console.log(`\n✅ .env updated: NEXT_PUBLIC_CONTRACT_ADDRESS=${address}`);
+  } else {
+    console.log("\n📝 Add to your .env:");
+    console.log(`   NEXT_PUBLIC_CONTRACT_ADDRESS=${address}`);
+  }
 
   if (hre.network.name === "sepolia") {
     console.log("\n⏳ Waiting 5 block confirmations before Etherscan verification...");

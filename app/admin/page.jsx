@@ -282,7 +282,7 @@ function SuccessBanner({ msg }) {
 
 // ─── Main Admin Page ───────────────────────────────────────────────────────────
 export default function AdminPage() {
-  const { contract, account, isAdmin } = useWallet();
+  const { contract, readContract, account, isAdmin } = useWallet();
   const router = useRouter();
   const [elections, setElections] = useState([]);
   const [loading, setLoading] = useState(true);
@@ -291,13 +291,13 @@ export default function AdminPage() {
     if (!account) { router.replace('/connect-wallet'); return; }
     if (account && !isAdmin) { router.replace('/elections'); return; }
     loadElections();
-  }, [contract, account, isAdmin]);
+  }, [readContract, account, isAdmin]);
 
   const loadElections = async () => {
-    if (!contract) return;
+    if (!readContract) { setLoading(false); return; }
     try {
       setLoading(true);
-      const raw = await contract.getAllElections();
+      const raw = await readContract.getAllElections();
       setElections(raw.map(serializeElection));
     } catch (err) {
       console.error(err);
