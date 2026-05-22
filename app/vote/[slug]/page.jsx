@@ -146,7 +146,7 @@ export default function VoterPortalPage() {
         </div>
         <div>
           <p className="text-white font-black text-sm leading-none">{org?.name || slug}</p>
-          <p className="text-[#64748b] text-xs">Secure Voting · Aegis Protocol</p>
+          <p className="text-[#64748b] text-xs">Secure Voting · Block Vote</p>
         </div>
       </div>
 

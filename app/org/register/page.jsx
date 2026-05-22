@@ -41,7 +41,7 @@ export default function OrgRegister() {
           Register Your Organization
         </h2>
         <p className="mt-2 text-center text-sm text-gray-600">
-          Set up your independent voting portal on Aegis Protocol.
+          Set up your independent voting portal on Block Vote.
         </p>
       </div>
 
@@ -89,7 +89,7 @@ export default function OrgRegister() {
                 <label htmlFor="slug" className="block text-sm font-medium text-gray-700">Portal URL Slug</label>
                 <div className="mt-1 flex rounded-md shadow-sm">
                   <span className="inline-flex items-center px-3 rounded-l-md border border-r-0 border-gray-300 bg-gray-50 text-gray-500 sm:text-sm">
-                    aegis.com/vote/
+                    blockvote.com/vote/
                   </span>
                   <input
                     type="text"
