@@ -7,9 +7,13 @@ import { formatAddress } from '@/lib/contract';
 import { Vote, LogOut, LayoutDashboard, UserCheck, List } from 'lucide-react';
 
 export default function Navbar() {
-  const { account, isAdmin, disconnect } = useWallet();
   const pathname = usePathname();
+  const { account, isAdmin, disconnect } = useWallet();
   const router = useRouter();
+
+  if (pathname?.startsWith('/admin')) {
+    return null;
+  }
 
   const handleDisconnect = () => {
     disconnect();
