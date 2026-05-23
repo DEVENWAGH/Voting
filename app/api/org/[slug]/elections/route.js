@@ -23,16 +23,26 @@ export async function GET(req, { params }) {
     if (!org) return NextResponse.json({ error: 'Org not found' }, { status: 404 });
 
     const contract = await getReadContract();
-    const raw = await contract.getAllElections();
-    const elections = raw.map(e => ({
-      id:          Number(e.id),
-      title:       e.title,
-      description: e.description,
-      bannerUrl:   e.bannerUrl,
-      startTime:   Number(e.startTime),
-      endTime:     Number(e.endTime),
-      phase:       Number(e.phase),
-    }));
+    let elections = [];
+    try {
+      const raw = await contract.getAllElections();
+      elections = raw.map(e => ({
+        id:          Number(e.id),
+        title:       e.title,
+        description: e.description,
+        bannerUrl:   e.bannerUrl,
+        startTime:   Number(e.startTime),
+        endTime:     Number(e.endTime),
+        phase:       Number(e.phase),
+      }));
+    } catch (contractErr) {
+      // Contract not deployed yet or BAD_DATA — return empty list
+      if (contractErr.code === 'BAD_DATA' || contractErr.code === 'CALL_EXCEPTION') {
+        console.warn('[org/elections GET] Contract not available — returning empty list');
+      } else {
+        throw contractErr;
+      }
+    }
     return NextResponse.json({ elections });
   } catch (err) {
     console.error('[org/elections GET]', err);
