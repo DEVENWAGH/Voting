@@ -1,11 +1,11 @@
-import './globals.css';
-import { WalletProvider } from '@/context/WalletContext';
-import SessionProviderWrapper from '@/components/SessionProviderWrapper';
-import Navbar from '@/components/Navbar';
+import "./globals.css";
+import { WalletProvider } from "@/context/WalletContext";
+import SessionProviderWrapper from "@/components/SessionProviderWrapper";
 
 export const metadata = {
-  title: 'Block Vote — Blockchain Voting for Organizations',
-  description: 'Secure, transparent elections for colleges, companies, DAOs and communities. Powered by Ethereum.',
+  title: "Block Vote — Blockchain Voting for Organizations",
+  description:
+    "Secure, transparent elections for colleges, companies, DAOs and communities. Powered by Ethereum.",
 };
 
 export default function RootLayout({ children }) {
@@ -14,7 +14,6 @@ export default function RootLayout({ children }) {
       <body>
         <SessionProviderWrapper>
           <WalletProvider>
-            <Navbar />
             <main>{children}</main>
           </WalletProvider>
         </SessionProviderWrapper>

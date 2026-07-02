@@ -56,4 +56,5 @@ export class WalletService {
   }
 }
 
-export default new WalletService();
+const walletService = new WalletService();
+export default walletService;

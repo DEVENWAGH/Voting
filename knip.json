@@ -1,0 +1,31 @@
+{
+  "$schema": "https://unpkg.com/knip@6/schema.json",
+  "entry": [
+    "app/**/*.{js,jsx,ts,tsx}",
+    "auth.js",
+    "scripts/**/*.js",
+    "test/**/*.{js,ts}"
+  ],
+  "project": [
+    "app/**/*.{js,jsx,ts,tsx}",
+    "components/**/*.{js,jsx,ts,tsx}",
+    "context/**/*.{js,jsx,ts,tsx}",
+    "lib/**/*.{js,jsx,ts,tsx}",
+    "src/**/*.{js,jsx,ts,tsx}",
+    "scripts/**/*.js",
+    "test/**/*.{js,ts}"
+  ],
+  "paths": {
+    "@/*": ["./*"]
+  },
+  "ignoreDependencies": [
+    "@openzeppelin/contracts-upgradeable",
+    "@openzeppelin/contracts",
+    "@nomicfoundation/hardhat-toolbox",
+    "@eslint/js",
+    "eslint",
+    "eslint-config-next",
+    "globals",
+    "tailwindcss"
+  ]
+}

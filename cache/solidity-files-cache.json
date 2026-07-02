@@ -1,43 +1,6 @@
 {
   "_format": "hh-sol-cache-2",
   "files": {
-    "C:\\Users\\Devil\\Desktop\\Voting\\contracts\\EnhancedVoting.sol": {
-      "lastModificationDate": 1774629974343,
-      "contentHash": "8660bada983af93984d5a6045216cb2f",
-      "sourceName": "contracts/EnhancedVoting.sol",
-      "solcConfig": {
-        "version": "0.8.22",
-        "settings": {
-          "optimizer": {
-            "enabled": true,
-            "runs": 200
-          },
-          "evmVersion": "paris",
-          "outputSelection": {
-            "*": {
-              "*": [
-                "abi",
-                "evm.bytecode",
-                "evm.deployedBytecode",
-                "evm.methodIdentifiers",
-                "metadata",
-                "storageLayout"
-              ],
-              "": [
-                "ast"
-              ]
-            }
-          }
-        }
-      },
-      "imports": [],
-      "versionPragmas": [
-        "^0.8.0"
-      ],
-      "artifacts": [
-        "EnhancedVoting"
-      ]
-    },
     "C:\\Users\\Devil\\Desktop\\Voting\\contracts\\VotingV1.sol": {
       "lastModificationDate": 1779100710559,
       "contentHash": "4f046b24f6699fbc857961af9eefbe83",
