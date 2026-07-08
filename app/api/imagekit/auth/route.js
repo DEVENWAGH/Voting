@@ -6,6 +6,8 @@
 import { NextResponse } from 'next/server';
 import ImageKit from 'imagekit';
 
+export const dynamic = 'force-dynamic';
+
 let _ik = null;
 function getImageKit() {
   if (!_ik) {

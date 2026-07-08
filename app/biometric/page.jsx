@@ -1,9 +1,23 @@
 'use client';
-import { useState, useRef, useEffect } from 'react';
+import { useState, useRef, useEffect, Suspense, useCallback } from 'react';
 import { Camera, CheckCircle, AlertCircle, Loader2, RefreshCw, Shield, UserCheck, KeyRound } from 'lucide-react';
 import { ethers } from 'ethers';
+import { useSearchParams, useRouter } from 'next/navigation';
 
 export default function BiometricPage() {
+  return (
+    <Suspense fallback={
+      <div className="min-h-screen bg-[#020617] text-white flex flex-col items-center justify-center">
+        <Loader2 size={40} className="text-indigo-500 animate-spin mb-4" />
+        <p className="text-slate-400 text-sm font-semibold tracking-wide">Loading Biometric Portal...</p>
+      </div>
+    }>
+      <BiometricPageContent />
+    </Suspense>
+  );
+}
+
+function BiometricPageContent() {
   const [mode, setMode] = useState('verify'); // 'verify' | 'register'
   
   // Voter credentials
@@ -13,7 +27,43 @@ export default function BiometricPage() {
   const [orgId, setOrgId] = useState('');
   const [orgName, setOrgName] = useState('');
   const [orgChecked, setOrgChecked] = useState(false);
+  const [nullifierHashParam, setNullifierHashParam] = useState('');
+  const [electionId, setElectionId] = useState('');
   
+  const searchParams = useSearchParams();
+  const router = useRouter();
+
+  // Ref to track if automatic capture has been triggered in the current session
+  const autoCapturedRef = useRef(false);
+
+  // Populate from query params if available
+  useEffect(() => {
+    const emailParam = searchParams.get('email');
+    const orgSlugParam = searchParams.get('orgSlug');
+    const memberIdParam = searchParams.get('memberId');
+    const modeParam = searchParams.get('mode'); // verify | register
+    const nullifierParam = searchParams.get('nullifierHash');
+    const electionIdParam = searchParams.get('electionId');
+
+    if (emailParam) setEmail(emailParam);
+    if (orgSlugParam) setOrgSlug(orgSlugParam);
+    if (memberIdParam) setMemberId(memberIdParam);
+    if (nullifierParam) setNullifierHashParam(nullifierParam);
+    if (electionIdParam) setElectionId(electionIdParam);
+    if (modeParam === 'verify' || modeParam === 'register') setMode(modeParam);
+  }, [searchParams]);
+
+  // Handle return redirect
+  const handleCompleteAndReturn = () => {
+    const redirectUrl = searchParams.get('redirect');
+    if (redirectUrl) {
+      window.location.href = redirectUrl;
+    } else {
+      setOrgChecked(false);
+      setSuccess(null);
+    }
+  };
+
   // Camera & Capture states
   const [hasWebcam, setHasWebcam] = useState(true);
   const [cameraActive, setCameraActive] = useState(false);
@@ -30,32 +80,57 @@ export default function BiometricPage() {
   const canvasRef = useRef(null);
   const streamRef = useRef(null);
   
-  // Lookup Organization by Slug
-  const lookupOrg = async () => {
-    if (!orgSlug) return;
+  // Lookup Voter and Organization by Email (and optionally Org Slug)
+  const lookupVoter = useCallback(async () => {
     setError('');
     try {
-      const res = await fetch(`/api/orgs/register?slug=${orgSlug.trim().toLowerCase()}`);
-      const data = await res.json();
-      if (res.ok && data.org) {
-        setOrgId(data.org._id);
-        setOrgName(data.org.name);
+      let resolvedSlug = orgSlug;
+      let resolvedMemberId = memberId;
+      let resolvedOrgId = orgId;
+
+      if (!resolvedSlug) {
+        if (!email) return;
+        const res = await fetch(`/api/voters/lookup?email=${encodeURIComponent(email.trim().toLowerCase())}`);
+        const data = await res.json();
+        
+        if (!res.ok || !data.success) {
+          throw new Error(data.error || 'Voter email is not registered.');
+        }
+        resolvedSlug = data.orgSlug;
+        resolvedMemberId = data.memberId;
+        resolvedOrgId = data.orgId;
+        
+        setOrgSlug(resolvedSlug);
+        setMemberId(resolvedMemberId);
+        setOrgId(resolvedOrgId);
+      }
+
+      const orgRes = await fetch(`/api/orgs/register?slug=${resolvedSlug}`);
+      const orgData = await orgRes.json();
+      if (orgRes.ok && orgData.org) {
+        setOrgId(orgData.org._id);
+        setOrgName(orgData.org.name);
         setOrgChecked(true);
       } else {
-        setOrgId('');
-        setOrgName('');
-        setOrgChecked(false);
-        setError('Organization slug not found.');
+        throw new Error('Voter organization not found.');
       }
     } catch (err) {
-      setError('Could not verify organization.');
+      setError(err.message || 'Could not verify voter credentials.');
     }
-  };
+  }, [orgSlug, email, memberId, orgId]);
+
+  // Auto-lookup organization if params are pre-filled
+  useEffect(() => {
+    if (orgSlug && email && memberId && !orgChecked) {
+      lookupVoter();
+    }
+  }, [orgSlug, email, memberId, orgChecked, lookupVoter]);
 
   // Start webcam
   const startCamera = async () => {
     setError('');
     setSuccess(null);
+    autoCapturedRef.current = false;
     try {
       if (streamRef.current) {
         streamRef.current.getTracks().forEach(track => track.stop());
@@ -69,7 +144,9 @@ export default function BiometricPage() {
       streamRef.current = stream;
       if (videoRef.current) {
         videoRef.current.srcObject = stream;
-        videoRef.current.play();
+        videoRef.current.play().catch(playErr => {
+          console.warn('Video play interrupted:', playErr);
+        });
       }
       setCameraActive(true);
       setHasWebcam(true);
@@ -89,6 +166,131 @@ export default function BiometricPage() {
     }
     setCameraActive(false);
   };
+
+  // Capture face landmarks and submit
+  const captureFace = useCallback(async () => {
+    setLoading(true);
+    setStatusText('Extracting zero-knowledge facial measurements...');
+    
+    try {
+      // 1. Get nullifier hash (either from search parameter directly or calculate it)
+      let nullifierHash = nullifierHashParam;
+      if (!nullifierHash) {
+        const secret = process.env.SERVER_IDENTITY_SECRET || 'dev-identity-secret-change-in-prod-12345';
+        nullifierHash = ethers.keccak256(
+          ethers.toUtf8Bytes(`${orgId}:${memberId.trim()}:${secret}`)
+        );
+      }
+      
+      // 2. Generate simulated face ratios with tiny random deviation
+      // We keep ratios around a standard face coordinate to represent high matching accuracy
+      const baseHeight = 220 + (Math.random() * 2 - 1);
+      const landmarks = {
+        faceHeight: baseHeight,
+        eyeDistance: 78 + (Math.random() * 0.8 - 0.4),
+        noseLength: 53 + (Math.random() * 0.6 - 0.3),
+        mouthWidth: 68 + (Math.random() * 0.8 - 0.4),
+        jawWidth: 158 + (Math.random() * 1.0 - 0.5),
+      };
+
+      // Capture a clean video frame directly from video stream (without oval overlay/dots)
+      let base64Image = null;
+      const video = videoRef.current;
+      if (video) {
+        const tempCanvas = document.createElement('canvas');
+        tempCanvas.width = video.videoWidth || 640;
+        tempCanvas.height = video.videoHeight || 480;
+        const tempCtx = tempCanvas.getContext('2d');
+        tempCtx.drawImage(video, 0, 0, tempCanvas.width, tempCanvas.height);
+        base64Image = tempCanvas.toDataURL('image/jpeg', 0.85);
+      }
+
+      // 3. Submit to backend API
+      const endpoint = mode === 'register' ? '/api/biometric/register' : '/api/biometric/verify';
+      const res = await fetch(endpoint, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          nullifierHash,
+          landmarks,
+          image: base64Image,
+          faceConfidence: 0.99,
+          electionId: electionId || undefined,
+        })
+      });
+      
+      const data = await res.json();
+      
+      if (!res.ok) {
+        throw new Error(data.error || 'Biometric process failed.');
+      }
+
+      stopCamera();
+      
+      if (mode === 'register') {
+        if (data.data?.token) {
+          localStorage.setItem(`biometricToken_${orgId}_${email.toLowerCase().trim()}`, data.data.token);
+        }
+
+        setSuccess({
+          title: 'Registered!',
+          desc: 'Your zero-knowledge face landmark ratios have been securely saved. A biometric session token has been issued for your vote.',
+          token: data.data?.token || null,
+          faceAttributes: data.data?.faceAttributes
+        });
+
+        const redirectUrl = searchParams.get('redirect');
+        if (redirectUrl) {
+          setStatusText('Registration successful! Redirecting back to the voting portal...');
+          setTimeout(() => {
+            window.location.href = redirectUrl;
+          }, 2500);
+        }
+      } else {
+        // Save token to localStorage so voter page can auto-detect it
+        localStorage.setItem(`biometricToken_${orgId}_${email.toLowerCase().trim()}`, data.token);
+        
+        setSuccess({
+          title: 'Face Verified!',
+          desc: 'A secure, short-lived biometric session token (JWT) has been issued for your vote. The voting portal will automatically detect this token.',
+          token: data.token,
+          nullifierHash,
+          faceAttributes: data.faceAttributes
+        });
+
+        const redirectUrl = searchParams.get('redirect');
+        if (redirectUrl) {
+          setStatusText('Verification successful! Redirecting back to the voting portal...');
+          setTimeout(() => {
+            window.location.href = redirectUrl;
+          }, 2500); // Increased to 2.5 seconds so they can see the detected details
+        }
+      }
+    } catch (err) {
+      setError(err.message);
+      stopCamera(); // Stop camera on error to prevent infinite restart loop
+    } finally {
+      setLoading(false);
+    }
+  }, [orgId, memberId, mode, email, searchParams, nullifierHashParam]);
+
+  // Trigger Capture Countdown
+  const triggerCapture = useCallback(() => {
+    if (loading) return;
+    setError('');
+    setCountdown(3);
+    
+    const interval = setInterval(() => {
+      setCountdown(prev => {
+        if (prev <= 1) {
+          clearInterval(interval);
+          captureFace();
+          return -1;
+        }
+        return prev - 1;
+      });
+    }, 1000);
+  }, [loading, captureFace]);
 
   // Cleanup on unmount
   useEffect(() => {
@@ -205,93 +407,9 @@ export default function BiometricPage() {
       active = false;
       clearInterval(livenessTimer);
     };
-  }, [cameraActive, liveness.faceDetected, liveness.centered, loading, countdown]);
+  }, [cameraActive, liveness.faceDetected, liveness.centered, loading, countdown, triggerCapture]);
 
-  // Trigger Capture Countdown
-  const triggerCapture = () => {
-    if (loading) return;
-    setError('');
-    setCountdown(3);
-    
-    const interval = setInterval(() => {
-      setCountdown(prev => {
-        if (prev <= 1) {
-          clearInterval(interval);
-          captureFace();
-          return -1;
-        }
-        return prev - 1;
-      });
-    }, 1000);
-  };
 
-  // Capture face landmarks and submit
-  const captureFace = async () => {
-    setLoading(true);
-    setStatusText('Extracting zero-knowledge facial measurements...');
-    
-    try {
-      // 1. Calculate nullifier hash locally
-      const secret = process.env.SERVER_IDENTITY_SECRET || 'dev-identity-secret-change-in-prod-12345';
-      const nullifierHash = ethers.keccak256(
-        ethers.toUtf8Bytes(`${orgId}:${memberId.trim()}:${secret}`)
-      );
-      
-      // 2. Generate simulated face ratios with tiny random deviation
-      // We keep ratios around a standard face coordinate to represent high matching accuracy
-      const baseHeight = 220 + (Math.random() * 2 - 1);
-      const landmarks = {
-        faceHeight: baseHeight,
-        eyeDistance: 78 + (Math.random() * 0.8 - 0.4),
-        noseLength: 53 + (Math.random() * 0.6 - 0.3),
-        mouthWidth: 68 + (Math.random() * 0.8 - 0.4),
-        jawWidth: 158 + (Math.random() * 1.0 - 0.5),
-      };
-
-      // 3. Submit to backend API
-      const endpoint = mode === 'register' ? '/api/biometric/register' : '/api/biometric/verify';
-      const res = await fetch(endpoint, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          nullifierHash,
-          landmarks,
-          faceConfidence: 0.99
-        })
-      });
-      
-      const data = await res.json();
-      
-      if (!res.ok) {
-        throw new Error(data.error || 'Biometric process failed.');
-      }
-      
-      stopCamera();
-      
-      if (mode === 'register') {
-        setSuccess({
-          title: 'Registered!',
-          desc: 'Your zero-knowledge face landmark ratios have been securely saved to MongoDB. You can now use facial authentication during voting.',
-          token: null
-        });
-      } else {
-        // Save token to localStorage so voter page can auto-detect it
-        localStorage.setItem(`biometricToken_${orgId}_${email.toLowerCase().trim()}`, data.token);
-        
-        setSuccess({
-          title: 'Face Verified!',
-          desc: 'A secure, short-lived biometric session token (JWT) has been issued for your vote. The voting portal will automatically detect this token.',
-          token: data.token,
-          nullifierHash
-        });
-      }
-    } catch (err) {
-      setError(err.message);
-      startCamera(); // restart camera on error
-    } finally {
-      setLoading(false);
-    }
-  };
 
   return (
     <div className="min-h-screen bg-[#020617] text-white flex flex-col font-sans">
@@ -307,15 +425,9 @@ export default function BiometricPage() {
           </div>
         </div>
         
-        <div className="flex bg-slate-900 border border-slate-800 rounded-xl p-1 text-xs">
-          <button onClick={() => { setMode('verify'); setSuccess(null); setError(''); }}
-            className={`px-4 py-2 rounded-lg font-bold transition ${mode === 'verify' ? 'bg-indigo-600 text-white shadow-md' : 'text-slate-400 hover:text-white'}`}>
-            Verify Face
-          </button>
-          <button onClick={() => { setMode('register'); setSuccess(null); setError(''); }}
-            className={`px-4 py-2 rounded-lg font-bold transition ${mode === 'register' ? 'bg-indigo-600 text-white shadow-md' : 'text-slate-400 hover:text-white'}`}>
-            Register Face
-          </button>
+        <div className="flex bg-indigo-950/40 border border-indigo-850/50 rounded-xl px-3 py-1.5 text-xs text-indigo-400 font-bold items-center gap-1.5 shadow-inner">
+          <Shield size={12} />
+          <span>Active Liveness Scan</span>
         </div>
       </header>
 
@@ -325,28 +437,14 @@ export default function BiometricPage() {
           <div className="bg-slate-900/40 border border-slate-800 backdrop-blur-xl rounded-2xl p-8 max-w-md w-full shadow-2xl">
             <div className="text-center mb-6">
               <h2 className="text-2xl font-black mb-2">Voter Verification</h2>
-              <p className="text-slate-400 text-sm">Enter your details to open the biometric interface.</p>
+              <p className="text-slate-400 text-sm">Enter your registered email address to open the biometric interface.</p>
             </div>
             
             <div className="space-y-4">
               <div>
-                <label className="block text-xs text-slate-400 font-semibold mb-1.5 uppercase tracking-wider">Organization Slug</label>
-                <input type="text" value={orgSlug} onChange={e => setOrgSlug(e.target.value)}
-                  placeholder="e.g. university-vote"
-                  className="w-full bg-[#090d1f] border border-slate-800 focus:border-indigo-500 text-white px-4 py-3 rounded-xl outline-none transition text-sm font-semibold" />
-              </div>
-              
-              <div>
                 <label className="block text-xs text-slate-400 font-semibold mb-1.5 uppercase tracking-wider">Email Address</label>
                 <input type="email" value={email} onChange={e => setEmail(e.target.value)}
                   placeholder="yourname@org.com"
-                  className="w-full bg-[#090d1f] border border-slate-800 focus:border-indigo-500 text-white px-4 py-3 rounded-xl outline-none transition text-sm font-semibold" />
-              </div>
-              
-              <div>
-                <label className="block text-xs text-slate-400 font-semibold mb-1.5 uppercase tracking-wider">Member ID (Roll / Employee ID)</label>
-                <input type="text" value={memberId} onChange={e => setMemberId(e.target.value)}
-                  placeholder="e.g. 2026-CS-45"
                   className="w-full bg-[#090d1f] border border-slate-800 focus:border-indigo-500 text-white px-4 py-3 rounded-xl outline-none transition text-sm font-semibold" />
               </div>
 
@@ -356,7 +454,7 @@ export default function BiometricPage() {
                 </div>
               )}
 
-              <button onClick={lookupOrg} disabled={!orgSlug || !email || !memberId}
+              <button onClick={lookupVoter} disabled={!email}
                 className="w-full mt-2 bg-indigo-600 hover:bg-indigo-500 disabled:opacity-50 text-white py-3.5 rounded-xl font-bold text-sm flex items-center justify-center gap-2 transition cursor-pointer shadow-lg shadow-indigo-600/20">
                 Proceed to Camera →
               </button>
@@ -380,7 +478,7 @@ export default function BiometricPage() {
                     <h3 className="text-lg font-black mb-1">Camera Inactive</h3>
                     <p className="text-slate-400 text-xs max-w-xs mb-4">We need camera access to capture zero-knowledge landmarks.</p>
                     <button onClick={startCamera} className="bg-indigo-600 hover:bg-indigo-500 text-white px-5 py-2.5 rounded-xl font-bold text-xs flex items-center gap-2 transition cursor-pointer">
-                      <Camera size={14} /> Enable Camera
+                      <Camera size={14} /> {error ? 'Recapture / Try Again' : 'Enable Camera'}
                     </button>
                   </div>
                 )}
@@ -432,6 +530,34 @@ export default function BiometricPage() {
                     </div>
                     <h4 className="text-lg font-bold text-white">{success.title}</h4>
                     <p className="text-slate-400 text-xs leading-relaxed">{success.desc}</p>
+
+                    {success.faceAttributes && (
+                      <div className="bg-[#090d1f] rounded-xl p-4 border border-slate-850/80 space-y-2 mt-2">
+                        <div className="text-[10px] font-extrabold text-indigo-400 uppercase tracking-widest mb-1.5">Detected Face Profile</div>
+                        <div className="grid grid-cols-2 gap-2 text-xs">
+                          <div className="bg-slate-950/40 p-2.5 rounded-xl border border-slate-850">
+                            <span className="text-slate-500 block text-[9px] font-bold uppercase tracking-wider">Gender</span>
+                            <span className="text-slate-200 font-black">{success.faceAttributes.gender}</span>
+                            <span className="text-indigo-400 text-[9px] block mt-0.5">{Math.round(success.faceAttributes.genderConfidence)}% Match</span>
+                          </div>
+                          <div className="bg-slate-950/40 p-2.5 rounded-xl border border-slate-850">
+                            <span className="text-slate-500 block text-[9px] font-bold uppercase tracking-wider">Age Range</span>
+                            <span className="text-slate-200 font-black">{success.faceAttributes.ageRange}</span>
+                            <span className="text-indigo-400 text-[9px] block mt-0.5">Demographics</span>
+                          </div>
+                          <div className="bg-slate-950/40 p-2.5 rounded-xl border border-slate-850">
+                            <span className="text-slate-500 block text-[9px] font-bold uppercase tracking-wider">Lighting Level</span>
+                            <span className="text-slate-200 font-black">{success.faceAttributes.brightness ? `${Math.round(success.faceAttributes.brightness)}%` : 'Good'}</span>
+                            <span className="text-indigo-400 text-[9px] block mt-0.5">Optimal Brightness</span>
+                          </div>
+                          <div className="bg-slate-950/40 p-2.5 rounded-xl border border-slate-850">
+                            <span className="text-slate-500 block text-[9px] font-bold uppercase tracking-wider">Image Quality</span>
+                            <span className="text-slate-200 font-black">{success.faceAttributes.sharpness ? `${Math.round(success.faceAttributes.sharpness)}%` : 'Sharp'}</span>
+                            <span className="text-indigo-400 text-[9px] block mt-0.5">High Focus Sharpness</span>
+                          </div>
+                        </div>
+                      </div>
+                    )}
                     
                     {success.token && (
                       <div className="bg-[#090d1f] rounded-xl p-3 border border-slate-800 mt-2">
@@ -444,7 +570,7 @@ export default function BiometricPage() {
                     )}
 
                     <div className="pt-2 flex gap-2">
-                      <button onClick={() => { setOrgChecked(false); setSuccess(null); }}
+                      <button onClick={handleCompleteAndReturn}
                         className="bg-indigo-600 hover:bg-indigo-500 text-white font-bold px-4 py-2.5 rounded-lg text-xs transition cursor-pointer">
                         Complete & Return
                       </button>

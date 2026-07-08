@@ -16,10 +16,12 @@ import { preflightCheck } from "@/lib/preflightCache";
 import { relayCastVote } from "@/lib/relay";
 import { sendVoteReceiptEmail } from "@/lib/mailer";
 import bcrypt from "bcryptjs";
+import { verifyBiometricToken } from "@/lib/biometric";
 
 export async function POST(req) {
   try {
-    const { email, otp, orgId, electionId, candidateId } = await req.json();
+    const { email, otp, orgId, electionId, candidateId, biometricToken: bodyToken } = await req.json();
+    const biometricToken = req.headers.get('x-biometric-token') || bodyToken;
 
     if (
       !email ||
@@ -136,6 +138,22 @@ export async function POST(req) {
     // formula mismatch between registration and voting.
     const nullifierHash = voter.nullifierHash;
 
+    // ── 2.5. Verify Biometric Token ──────────────────────────────────────────
+    if (!biometricToken) {
+      return NextResponse.json(
+        { error: "Biometric session verification required. Please verify your face first." },
+        { status: 403 }
+      );
+    }
+
+    const decodedBiometric = verifyBiometricToken(biometricToken);
+    if (!decodedBiometric || !decodedBiometric.authenticated) {
+      return NextResponse.json(
+        { error: "Biometric authentication is invalid. Please verify your face again." },
+        { status: 403 }
+      );
+    }
+
     // ── 3. Edge Pre-flight — fast double-vote guard (cache + chain) ───────────
     const checkResult = await preflightCheck(nullifierHash, Number(electionId));
     if (!checkResult.allowed) {
@@ -188,10 +206,22 @@ export async function POST(req) {
       verifyUrl,
     });
   } catch (err) {
-    console.error("[verify-otp]", err);
-    return NextResponse.json(
-      { error: err.message || "Verification failed." },
-      { status: 500 },
-    );
+    console.error('[verify-otp]', err);
+
+    // Extract a clean, user-friendly error from blockchain reverts
+    const reason = err?.reason || err?.revert?.args?.[0] || err?.message || 'Verification failed.';
+    let userMessage = reason;
+
+    if (reason.includes('voter not registered')) {
+      userMessage = 'Your voter registration is not yet finalized on the blockchain. Please contact your election admin to complete on-chain registration.';
+    } else if (reason.includes('already voted')) {
+      userMessage = 'Your vote has already been recorded on the blockchain for this election.';
+    } else if (reason.includes('election not active') || reason.includes('not in voting phase')) {
+      userMessage = 'This election is no longer accepting votes.';
+    } else if (reason.includes('invalid candidate')) {
+      userMessage = 'The selected candidate is not valid for this election.';
+    }
+
+    return NextResponse.json({ error: userMessage }, { status: 500 });
   }
 }

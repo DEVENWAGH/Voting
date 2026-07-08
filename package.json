@@ -18,6 +18,7 @@
     "deploy:v2-sepolia": "hardhat run scripts/deployV2Impl.js --network sepolia"
   },
   "dependencies": {
+    "@aws-sdk/client-rekognition": "^3.1081.0",
     "@tailwindcss/postcss": "^4.1.11",
     "@tanstack/react-query": "^5.101.2",
     "bcryptjs": "^3.0.3",
