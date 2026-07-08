@@ -12,11 +12,13 @@ export async function GET(req) {
     await connectDB();
 
     const { searchParams } = new URL(req.url);
-    const filter = searchParams.get('filter') || 'pending'; // pending | all
+    const filter = searchParams.get('filter') || 'pending'; // pending | all | completed
 
     let query = {};
     if (filter === 'pending') {
       query = { pendingApproval: true, guardianApproved: false };
+    } else if (filter === 'completed') {
+      query = { phase: 2 };
     }
 
     const elections = await Election.find(query)
@@ -31,6 +33,7 @@ export async function GET(req) {
 
     const enriched = elections.map(e => ({
       ...e,
+      id: e.electionId,
       org: orgMap[e.orgSlug] || { name: e.orgSlug, slug: e.orgSlug },
     }));
 

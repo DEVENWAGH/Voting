@@ -1,9 +1,109 @@
+@import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800;900&family=JetBrains+Mono:wght@400;500;600;700&display=swap');
 @import "tailwindcss";
-@import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800;900&display=swap');
+
+@theme {
+  --color-primary: var(--primary);
+  --color-primary-active: var(--primary-active);
+  --color-primary-disabled: var(--primary-disabled);
+  --color-ink: var(--ink);
+  --color-body: var(--body);
+  --color-body-strong: var(--body-strong);
+  --color-muted: var(--muted);
+  --color-muted-soft: var(--muted-soft);
+  --color-hairline: var(--hairline);
+  --color-hairline-soft: var(--hairline-soft);
+  --color-canvas: var(--canvas);
+  --color-surface-soft: var(--surface-soft);
+  --color-surface-card: var(--surface-card);
+  --color-surface-strong: var(--surface-strong);
+  --color-surface-dark: var(--surface-dark);
+  --color-surface-dark-elevated: var(--surface-dark-elevated);
+  --color-semantic-up: var(--semantic-up);
+  --color-semantic-down: var(--semantic-down);
+  --color-accent-yellow: var(--accent-yellow);
+
+  --font-display: 'Inter', -apple-system, sans-serif;
+  --font-sans: 'Inter', -apple-system, sans-serif;
+  --font-mono: 'JetBrains Mono', monospace;
+
+  --radius-xl: 24px;
+  --radius-lg: 16px;
+  --radius-md: 12px;
+  --radius-sm: 8px;
+  --radius-xs: 4px;
+}
 
 :root {
-  --background: #020617;
-  --foreground: #f1f5f9;
+  --background: #ffffff;
+  --foreground: #0a0b0d;
+
+  --primary: #0052ff;
+  --primary-active: #003ecc;
+  --primary-disabled: #a8b8cc;
+  --ink: #0a0b0d;
+  --body: #5b616e;
+  --body-strong: #0a0b0d;
+  --muted: #7c828a;
+  --muted-soft: #a8acb3;
+  --hairline: #dee1e6;
+  --hairline-soft: #eef0f3;
+  --canvas: #ffffff;
+  --surface-soft: #f7f7f7;
+  --surface-card: #ffffff;
+  --surface-strong: #eef0f3;
+  --surface-dark: #0a0b0d;
+  --surface-dark-elevated: #16181c;
+  --semantic-up: #05b169;
+  --semantic-down: #cf202f;
+  --accent-yellow: #f4b000;
+}
+
+/* System Dark Preference */
+@media (prefers-color-scheme: dark) {
+  :root:not(.light-theme) {
+    --background: #0a0b0d;
+    --foreground: #ffffff;
+
+    --primary: #0052ff;
+    --primary-active: #3b82f6;
+    --primary-disabled: #3b4252;
+    --ink: #ffffff;
+    --body: #a8acb3;
+    --body-strong: #ffffff;
+    --muted: #a8acb3;
+    --muted-soft: #5b616e;
+    --hairline: #1e293b;
+    --hairline-soft: #0f172a;
+    --canvas: #0a0b0d;
+    --surface-soft: #0f172a;
+    --surface-card: #16181c;
+    --surface-strong: #1e293b;
+    --surface-dark: #000000;
+    --surface-dark-elevated: #0f172a;
+  }
+}
+
+/* Explicit Dark Class Toggled by User */
+.dark {
+  --background: #0a0b0d;
+  --foreground: #ffffff;
+
+  --primary: #0052ff;
+  --primary-active: #3b82f6;
+  --primary-disabled: #3b4252;
+  --ink: #ffffff;
+  --body: #a8acb3;
+  --body-strong: #ffffff;
+  --muted: #a8acb3;
+  --muted-soft: #5b616e;
+  --hairline: #1e293b;
+  --hairline-soft: #0f172a;
+  --canvas: #0a0b0d;
+  --surface-soft: #0f172a;
+  --surface-card: #16181c;
+  --surface-strong: #1e293b;
+  --surface-dark: #000000;
+  --surface-dark-elevated: #0f172a;
 }
 
 *, *::before, *::after {
@@ -16,13 +116,16 @@ body {
   font-family: 'Inter', system-ui, -apple-system, sans-serif;
   -webkit-font-smoothing: antialiased;
   -moz-osx-font-smoothing: grayscale;
+  transition: background-color 0.2s, color 0.2s;
 }
 
 /* Custom scrollbar */
 ::-webkit-scrollbar { width: 5px; height: 5px; }
-::-webkit-scrollbar-track { background: #0f172a; }
-::-webkit-scrollbar-thumb { background: #334155; border-radius: 99px; }
-::-webkit-scrollbar-thumb:hover { background: #6366f1; }
+::-webkit-scrollbar-track { background: var(--surface-soft); }
+::-webkit-scrollbar-thumb { background: var(--hairline); border-radius: 99px; }
+::-webkit-scrollbar-thumb:hover { background: var(--primary); }
 
-/* Smooth transitions for interactive elements */
-a, button { transition-property: color, background-color, border-color, opacity, transform, box-shadow; transition-duration: 150ms; }
+/* Custom animation presets */
+.spring-hover {
+  transition: all 0.3s cubic-bezier(0.175, 0.885, 0.32, 1.275);
+}

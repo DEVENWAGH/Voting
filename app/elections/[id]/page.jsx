@@ -2,6 +2,7 @@
 
 import { useState, useEffect, useCallback } from 'react';
 import { useParams } from 'next/navigation';
+import { motion } from 'framer-motion';
 import {
   PHASE, PHASE_COLOR, formatDate, serializeElection, serializeCandidate,
 } from '@/lib/contract';
@@ -10,6 +11,7 @@ import {
 } from 'lucide-react';
 import Link from 'next/link';
 import { ethers } from 'ethers';
+import ThemeToggle from '@/components/ThemeToggle';
 
 // Read-only contract fetching (no wallet required)
 async function getReadContract() {
@@ -34,13 +36,10 @@ export default function PublicElectionDetailPage() {
       setError('');
       
       const contract = await getReadContract();
-
       const electionRaw = await contract.getElection(id);
       const e = serializeElection(electionRaw);
       setElection(e);
 
-      // We only care about full details in Phase 2 (Completed)
-      // Otherwise, we just show the basics.
       if (e.phase === 2) {
         const resRaw = await contract.getElectionResults(id);
         const sortedRes = resRaw.map(serializeCandidate).sort((a, b) => b.voteCount - a.voteCount);
@@ -50,8 +49,7 @@ export default function PublicElectionDetailPage() {
           const winnerRaw = await contract.getWinner(id);
           setWinner(serializeCandidate(winnerRaw));
         } catch (we) {
-          // It's possible there is a tie or 0 votes total
-          console.warn('Could not determine single winner:', we);
+          console.warn('Could not determine winner:', we);
         }
       } else {
         const cands = await contract.getCandidates(id);
@@ -59,7 +57,7 @@ export default function PublicElectionDetailPage() {
       }
     } catch (err) {
       console.error(err);
-      setError('Failed to load election details. ID may be invalid or node is offline.');
+      setError('Failed to load election details. ID may be invalid or blockchain node is unreachable.');
     } finally {
       setLoading(false);
     }
@@ -69,21 +67,23 @@ export default function PublicElectionDetailPage() {
 
   if (loading) {
     return (
-      <div className="min-h-screen bg-[#020617] flex justify-center items-center">
-        <Loader2 className="animate-spin text-indigo-500" size={44} />
+      <div className="min-h-screen bg-canvas flex justify-center items-center">
+        <Loader2 className="animate-spin text-primary" size={32} />
       </div>
     );
   }
 
   if (!election || error) {
     return (
-      <div className="min-h-screen bg-[#020617] flex flex-col items-center justify-center p-6 text-center">
-        <AlertCircle size={48} className="text-red-500 mb-4" />
-        <p className="text-xl text-white font-bold mb-2">Election not found</p>
-        <p className="text-slate-400 mb-6">{error || 'This election does not exist on the blockchain.'}</p>
-        <Link href="/elections" className="text-indigo-400 hover:text-indigo-300 font-bold px-6 py-2.5 bg-indigo-500/10 rounded-full transition">
-          ← Back to Ledger
-        </Link>
+      <div className="min-h-screen bg-surface-soft flex flex-col items-center justify-center p-6 text-center">
+        <div className="bg-canvas border border-hairline rounded-xl p-8 max-w-md shadow-sm">
+          <AlertCircle size={40} className="text-semantic-down mx-auto mb-4" />
+          <p className="text-xl text-ink font-semibold mb-2">Record Not Found</p>
+          <p className="text-body text-sm mb-6">{error || 'This ballot ID does not exist on-chain.'}</p>
+          <Link href="/elections" className="inline-flex bg-primary hover:bg-primary-active text-white font-semibold px-6 py-2.5 rounded-full text-sm transition-all shadow-sm">
+            ← Return to Directory
+          </Link>
+        </div>
       </div>
     );
   }
@@ -91,140 +91,152 @@ export default function PublicElectionDetailPage() {
   const phase = election.phase;
 
   return (
-    <div className="min-h-screen bg-[#020617] text-white">
+    <div className="min-h-screen bg-canvas text-ink flex flex-col font-sans">
+      
       {/* Navbar */}
-      <nav className="border-b border-white/5 bg-slate-950/80 px-6 md:px-16 py-4 flex items-center justify-between sticky top-0 z-10 backdrop-blur-xl">
-        <Link href="/elections" className="flex items-center gap-2 text-sm text-slate-400 hover:text-white transition">
-          <ChevronLeft size={16} /> Back to Ledger
+      <nav className="border-b border-hairline bg-canvas/80 backdrop-blur-md px-6 md:px-16 py-4 flex items-center justify-between sticky top-0 z-10">
+        <Link href="/elections" className="flex items-center gap-2 text-sm text-body hover:text-ink transition font-semibold">
+          <ChevronLeft size={16} /> 
+          <span>Elections Directory</span>
         </Link>
-        <div className="flex items-center gap-2 text-xs text-slate-400 bg-slate-900 border border-slate-800 px-3 py-1.5 rounded-full font-mono">
-          ID: {id}
+        <div className="flex items-center gap-3">
+          <ThemeToggle />
+          <div className="flex items-center gap-2 text-xs text-muted bg-surface-soft border border-hairline px-3 py-1.5 rounded-full font-mono font-medium">
+            BALLOT ID: {id}
+          </div>
         </div>
       </nav>
 
-      <div className="px-6 md:px-16 py-10 max-w-5xl mx-auto">
+      {/* Main Container */}
+      <main className="px-6 md:px-16 py-12 max-w-4xl mx-auto w-full">
         
-        {/* Election header */}
-        <div className="bg-slate-900/40 border border-slate-800 rounded-3xl p-8 md:p-10 mb-8 backdrop-blur-xl relative overflow-hidden">
-          <div className={`absolute top-0 left-0 w-full h-1 ${phase === 2 ? 'bg-gradient-to-r from-green-400 to-cyan-500' : 'bg-slate-800'}`} />
+        {/* Banner */}
+        <div className="bg-canvas border border-hairline rounded-xl p-8 md:p-10 mb-8 shadow-sm relative overflow-hidden">
+          <div className={`absolute top-0 left-0 w-full h-1 ${phase === 2 ? 'bg-gradient-to-r from-emerald-400 to-primary/85' : 'bg-primary/25'}`} />
           
-          <div className={`inline-flex text-xs font-bold px-3 py-1 rounded-full border mb-6 ${PHASE_COLOR[phase].replace('bg-', 'bg-').replace('border-', 'border-').replace('text-', 'text-')}`}>
-            {PHASE[phase]}
+          <div className="mb-4">
+            <span className={`text-[10px] font-bold px-2.5 py-0.5 rounded-full border uppercase tracking-wider ${
+              phase === 2 ? 'text-emerald-700 bg-emerald-50 border-emerald-200' :
+              phase === 1 ? 'text-amber-700 bg-amber-50 border-amber-200' :
+                            'text-primary bg-primary/5 border-primary/25'
+            }`}>
+              {phase === 2 ? 'Completed' : phase === 1 ? 'Voting Active' : 'Registration'}
+            </span>
           </div>
+
+          <h1 className="text-3xl md:text-4xl font-display font-normal tracking-tight text-ink mb-4">{election.title}</h1>
+          <p className="text-body text-base leading-relaxed mb-6 max-w-2xl">{election.description}</p>
           
-          <h1 className="text-4xl md:text-5xl font-black mb-4 tracking-tight">{election.title}</h1>
-          <p className="text-slate-400 text-lg mb-8 max-w-3xl leading-relaxed">{election.description}</p>
-          
-          <div className="flex flex-wrap gap-4 text-sm font-medium">
-            <div className="flex items-center gap-2 bg-slate-950/50 border border-slate-800 px-4 py-2 rounded-xl text-slate-300">
-              <Calendar size={16} className="text-indigo-400" />
-              <span>Starts: <span className="text-white">{formatDate(election.startTime)}</span></span>
+          <div className="flex flex-wrap gap-3 text-xs font-semibold">
+            <div className="flex items-center gap-2 bg-surface-soft border border-hairline px-4 py-2 rounded-full text-body font-mono">
+              <Calendar size={14} className="text-primary" />
+              <span>Starts: <span className="text-ink">{formatDate(election.startTime)}</span></span>
             </div>
-            <div className="flex items-center gap-2 bg-slate-950/50 border border-slate-800 px-4 py-2 rounded-xl text-slate-300">
-              <Calendar size={16} className="text-indigo-400" />
-              <span>Ends: <span className="text-white">{formatDate(election.endTime)}</span></span>
+            <div className="flex items-center gap-2 bg-surface-soft border border-hairline px-4 py-2 rounded-full text-body font-mono">
+              <Calendar size={14} className="text-primary" />
+              <span>Ends: <span className="text-ink">{formatDate(election.endTime)}</span></span>
             </div>
           </div>
         </div>
 
-        {/* Phase 0 & 1 Content */}
+        {/* Dynamic phases layout */}
         {(phase === 0 || phase === 1) && (
-          <div className="text-center py-16 bg-slate-900/30 border border-slate-800 border-dashed rounded-3xl">
-            <Vote size={48} className="text-slate-600 mx-auto mb-4" />
-            <h2 className="text-2xl font-bold text-white mb-2">
-              {phase === 0 ? 'Registration in Progress' : 'Voting is Live'}
+          <div className="text-center py-16 bg-surface-soft/40 border border-dashed border-hairline rounded-xl shadow-sm">
+            <Vote size={36} className="text-muted mx-auto mb-4" />
+            <h2 className="text-xl font-display font-normal text-ink mb-2">
+              {phase === 0 ? 'Ballot Initialization' : 'Voting is Underway'}
             </h2>
-            <p className="text-slate-400 max-w-md mx-auto">
+            <p className="text-body text-sm max-w-md mx-auto leading-relaxed px-4">
               {phase === 0 
-                ? 'Candidates are currently being added. Results will be available once the election is completed.'
-                : 'Voting is currently active. To protect voter privacy, live tallies are hidden until the election ends.'}
+                ? 'The ballot registry is currently being initialized. Dynamic updates will appear here once official polling starts.'
+                : 'Ballot lines are open. To maintain voter secrecy, tallies remain encrypted until the election completes.'}
             </p>
             {phase === 1 && (
-              <p className="mt-4 text-sm text-indigo-400 font-semibold">
-                If you are a registered voter, check your email for the voting link provided by your organization.
-              </p>
+              <div className="mt-6 bg-primary/5 border border-primary/20 rounded-lg p-4 max-w-sm mx-auto text-xs text-primary font-semibold">
+                Please follow the authentication link sent to your registered email to cast your ballot.
+              </div>
             )}
           </div>
         )}
 
-        {/* Phase 2 Content — Results */}
+        {/* Phase 2: Completed Tally */}
         {phase === 2 && (
-          <div className="space-y-8 animate-in fade-in slide-in-from-bottom-4">
+          <div className="space-y-8">
             
-            {/* Winner banner */}
+            {/* Winner Badge */}
             {winner ? (
-              <div className="bg-gradient-to-br from-yellow-900/30 to-amber-900/10 border border-yellow-700/50 rounded-3xl p-8 md:p-10 flex flex-col md:flex-row items-center gap-8 text-center md:text-left relative overflow-hidden">
-                <div className="absolute top-0 right-0 w-64 h-64 bg-yellow-500/10 rounded-full blur-3xl pointer-events-none -translate-y-1/2 translate-x-1/4" />
-                
-                <div className="w-24 h-24 rounded-full bg-yellow-950 border-2 border-yellow-500/30 flex items-center justify-center shrink-0 shadow-[0_0_30px_rgba(234,179,8,0.2)]">
-                  <Trophy size={48} className="text-yellow-400" />
+              <motion.div 
+                initial={{ opacity: 0, y: 5 }}
+                animate={{ opacity: 1, y: 0 }}
+                className="bg-canvas border border-accent-yellow rounded-xl p-6 md:p-8 flex flex-col md:flex-row items-center gap-6 shadow-sm relative overflow-hidden"
+              >
+                <div className="w-16 h-16 rounded-full bg-surface-soft border border-hairline flex items-center justify-center shrink-0 text-amber-500 shadow-sm">
+                  <Trophy size={28} />
                 </div>
-                <div>
-                  <p className="text-yellow-500 text-sm font-black uppercase tracking-widest mb-2 flex items-center justify-center md:justify-start gap-2">
-                    Winner Declared
-                  </p>
-                  <h2 className="text-4xl font-black text-white mb-2">{winner.name}</h2>
-                  <div className="flex flex-wrap items-center justify-center md:justify-start gap-3">
-                    <span className="text-amber-200 font-semibold bg-amber-950/50 px-3 py-1 rounded-lg border border-amber-800/50">
+                <div className="text-center md:text-left min-w-0 flex-1">
+                  <span className="text-[10px] font-bold text-accent-yellow uppercase tracking-widest block mb-1">
+                    WINNING CANDIDATE
+                  </span>
+                  <h2 className="text-2xl font-semibold text-ink truncate leading-tight">{winner.name}</h2>
+                  
+                  <div className="flex flex-wrap items-center justify-center md:justify-start gap-2 mt-2">
+                    <span className="text-xs font-semibold bg-surface-strong px-2.5 py-0.5 rounded-full text-ink">
                       {winner.party}
                     </span>
-                    <span className="text-white font-bold bg-slate-900 border border-slate-700 px-3 py-1 rounded-lg">
-                      {winner.voteCount} valid vote{winner.voteCount !== 1 ? 's' : ''}
+                    <span className="text-xs font-semibold font-mono bg-primary/10 text-primary px-2.5 py-0.5 rounded-full">
+                      {winner.voteCount} votes cast
                     </span>
                   </div>
                 </div>
-              </div>
+              </motion.div>
             ) : (
-              <div className="bg-slate-900/40 border border-slate-800 rounded-3xl p-8 text-center">
-                <p className="text-slate-400 font-semibold">No definitive winner could be declared (tie or zero votes).</p>
+              <div className="bg-canvas border border-hairline rounded-xl p-6 text-center text-body text-sm shadow-sm">
+                No definitive winner declared (zero ballots cast or tie-break required).
               </div>
             )}
 
-            {/* Results table */}
-            <div>
-              <h2 className="text-2xl font-bold mb-6 flex items-center gap-2">
-                <Vote className="text-indigo-400" size={24} /> Official Final Tally
+            {/* Results Grid */}
+            <div className="space-y-4">
+              <h2 className="text-lg font-semibold text-ink flex items-center gap-2">
+                <Vote size={18} className="text-primary" />
+                Official Audit Tallies
               </h2>
               
-              <div className="grid grid-cols-1 md:grid-cols-2 gap-5">
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                 {results.map((c, rank) => {
                   const maxVotes = Math.max(...results.map(r => r.voteCount), 1);
                   const percentage = ((c.voteCount / maxVotes) * 100).toFixed(1);
                   const isWinner = winner && c.id === winner.id;
                   
                   return (
-                    <div key={c.id} className={`bg-slate-900/60 border rounded-2xl p-6 relative overflow-hidden ${
-                      isWinner ? 'border-yellow-600/50 shadow-[0_0_15px_rgba(234,179,8,0.05)]' : 'border-slate-800'
+                    <div key={c.id} className={`bg-canvas border rounded-xl p-5 relative overflow-hidden shadow-sm transition-all ${
+                      isWinner ? 'border-accent-yellow' : 'border-hairline hover:border-body'
                     }`}>
-                      {isWinner && <div className="absolute top-0 left-0 w-1 h-full bg-yellow-500" />}
-                      
-                      <div className="flex justify-between items-start mb-4">
+                      <div className="flex justify-between items-start mb-4 relative z-10">
                         <div className="flex items-center gap-3">
-                          <div className={`w-12 h-12 rounded-xl flex items-center justify-center text-2xl border ${
-                            isWinner ? 'bg-yellow-950/50 border-yellow-500/20' : 'bg-slate-950 border-slate-800'
-                          }`}>
-                            {c.symbol || <User size={20} className="text-slate-500" />}
+                          <div className="w-10 h-10 rounded-full bg-surface-strong border border-hairline flex items-center justify-center text-lg overflow-hidden shrink-0">
+                            {c.symbol ? c.symbol : <User size={18} className="text-muted" />}
                           </div>
                           <div>
-                            <h3 className="font-bold text-white text-lg leading-tight">{c.name}</h3>
-                            <p className="text-xs text-slate-400 font-medium">{c.party}</p>
+                            <h3 className="font-semibold text-ink text-sm leading-tight">{c.name}</h3>
+                            <p className="text-[11px] text-body mt-0.5">{c.party}</p>
                           </div>
                         </div>
                         <div className="text-right">
-                          <span className={`text-2xl font-black ${isWinner ? 'text-yellow-400' : 'text-white'}`}>
+                          <span className="text-xl font-display font-normal text-ink font-mono block leading-none">
                             {c.voteCount}
                           </span>
-                          <span className="text-xs text-slate-500 block uppercase font-bold tracking-wider">Votes</span>
+                          <span className="text-[9px] font-semibold text-muted uppercase tracking-wider mt-1 block">Votes</span>
                         </div>
                       </div>
                       
-                      {/* Vote bar */}
-                      <div className="h-2.5 bg-slate-950 rounded-full overflow-hidden border border-slate-800">
-                        <div
-                          className={`h-full rounded-full transition-all duration-1000 ease-out ${
-                            isWinner ? 'bg-yellow-500' : 'bg-indigo-500'
-                          }`}
-                          style={{ width: `${percentage}%` }}
+                      {/* Spring Progress */}
+                      <div className="h-2 bg-surface-strong rounded-full overflow-hidden relative z-10">
+                        <motion.div
+                          className={`h-full rounded-full ${isWinner ? 'bg-accent-yellow' : 'bg-primary'}`}
+                          initial={{ width: 0 }}
+                          animate={{ width: `${percentage}%` }}
+                          transition={{ type: 'spring', stiffness: 50, damping: 15 }}
                         />
                       </div>
                     </div>
@@ -234,7 +246,8 @@ export default function PublicElectionDetailPage() {
             </div>
           </div>
         )}
-      </div>
+      </main>
+
     </div>
   );
 }

@@ -122,6 +122,7 @@ export async function POST(req, { params }) {
       symbol.trim(),
       manifesto,
       photoUrl,
+      slug,
     );
 
     // Pin candidate metadata to IPFS

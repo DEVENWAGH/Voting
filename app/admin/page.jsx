@@ -1,50 +1,39 @@
-"use client";
+'use client';
 
-import { useState, useEffect, useCallback } from "react";
-import { useRouter } from "next/navigation";
-import { useWallet } from "@/context/WalletContext";
+import { useState, useEffect, useCallback } from 'react';
+import { useRouter } from 'next/navigation';
+import { useWallet } from '@/context/WalletContext';
 import {
-  Shield,
-  Building2,
-  BatteryCharging,
-  RefreshCw,
-  LogOut,
-  AlertCircle,
-  CheckCircle,
-  Loader2,
-  Clock,
-  CheckCircle2,
-  UserCheck,
-} from "lucide-react";
+  Shield, Building2, BatteryCharging, RefreshCw, LogOut,
+  AlertCircle, CheckCircle, Loader2, Clock, CheckCircle2,
+  UserCheck, Trophy, BarChart3, Fuel, Plus, Play, Trash2, Database
+} from 'lucide-react';
+import ElectionResults from '@/components/ElectionResults';
+import ThemeToggle from '@/components/ThemeToggle';
+
+const APPROVAL_THRESHOLD = 2;
 
 const TABS = [
-  { id: "approvals", label: "Election Approvals", icon: Clock },
-  { id: "orgs", label: "Organizations", icon: Building2 },
-  { id: "gas", label: "Gas Station", icon: BatteryCharging },
-  { id: "gov", label: "Governance", icon: Shield },
+  { id: 'approvals', label: 'Elections approvals', icon: Clock },
+  { id: 'results', label: 'Public records', icon: Trophy },
+  { id: 'orgs', label: 'Organizations register', icon: Building2 },
+  { id: 'gas', label: 'Gas logistics', icon: BatteryCharging },
+  { id: 'gov', label: 'Governance protocol', icon: Shield },
 ];
 
 function Toast({ type, msg }) {
-  const isErr = type === "error";
+  const isErr = type === 'error';
+  const bg = isErr ? 'bg-red-50 border-red-200 text-red-700' : 'bg-green-50 border-green-200 text-green-700';
+  const Icon = isErr ? AlertCircle : CheckCircle;
   return (
-    <div
-      className={`flex items-start gap-2 border rounded-xl p-3 mb-4 text-sm ${
-        isErr
-          ? "bg-red-950/60 border-red-800 text-red-300"
-          : "bg-green-950/60 border-green-800 text-green-300"
-      }`}
-    >
-      {isErr ? (
-        <AlertCircle size={16} className="mt-0.5 shrink-0" />
-      ) : (
-        <CheckCircle size={16} className="mt-0.5 shrink-0" />
-      )}
-      {msg}
+    <div className={`flex items-start gap-2.5 border rounded-lg p-3.5 mb-4 text-sm ${bg}`}>
+      <Icon size={16} className="mt-0.5 shrink-0" />
+      <span>{msg}</span>
     </div>
   );
 }
 
-// ── Election Approvals Tab ─────────────────────────────────────────────────────
+// ── Approvals Tab ────────────────────────────────────────────────────────────
 function ApprovalsTab({ account }) {
   const [elections, setElections] = useState([]);
   const [loading, setLoading] = useState(true);
@@ -54,208 +43,296 @@ function ApprovalsTab({ account }) {
   const load = useCallback(async () => {
     setLoading(true);
     try {
-      const r = await fetch("/api/admin/elections?filter=pending");
+      const r = await fetch('/api/admin/elections?filter=pending');
       const d = await r.json();
       setElections(d.elections || []);
     } catch {}
     setLoading(false);
   }, []);
 
-  useEffect(() => {
-    load();
-  }, [load]);
+  useEffect(() => { load(); }, [load]);
 
   const handleAction = async (electionId, action) => {
     setMsg(null);
     setActioning(electionId);
     try {
-      const r = await fetch("/api/admin/elections/approve", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
+      const r = await fetch('/api/admin/elections/approve', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ electionId, guardianAddress: account, action }),
       });
       const d = await r.json();
       if (!r.ok) throw new Error(d.error);
-      setMsg({ type: "success", text: d.message });
+      setMsg({ type: 'success', text: d.message });
       load();
     } catch (e) {
-      setMsg({ type: "error", text: e.message });
+      setMsg({ type: 'error', text: e.message });
     }
     setActioning(null);
   };
 
   return (
     <div className="space-y-6">
-      <div className="flex items-center justify-between">
+      <div className="flex items-center justify-between border-b border-hairline pb-4">
         <div>
-          <h2 className="text-xl font-bold">Pending Go-Live Requests</h2>
-          <p className="text-slate-400 text-sm">
-            Review elections before they go live on-chain.
-          </p>
+          <h3 className="text-lg font-semibold text-ink">Pending Approvals</h3>
+          <p className="text-xs text-body mt-0.5">Guardians must co-sign requests to transition elections live.</p>
         </div>
-        <button
-          onClick={load}
-          className="flex items-center gap-1.5 text-xs bg-slate-900 border border-slate-700 hover:border-indigo-500 px-3 py-2 rounded-xl transition"
-        >
-          <RefreshCw size={12} /> Refresh
+        <button onClick={load} className="flex items-center gap-1.5 text-xs text-body hover:text-ink border border-hairline px-3 py-1.5 rounded-full bg-canvas cursor-pointer">
+          <RefreshCw size={12} /> Sync
         </button>
       </div>
 
       {msg && <Toast type={msg.type} msg={msg.text} />}
 
       {loading ? (
-        <div className="flex justify-center py-10">
-          <Loader2 className="animate-spin text-indigo-500" size={30} />
-        </div>
+        <div className="flex justify-center py-10"><Loader2 className="animate-spin text-primary" size={24} /></div>
       ) : elections.length === 0 ? (
-        <div className="text-center py-16 border border-dashed border-slate-800 rounded-2xl bg-slate-900/30">
-          <CheckCircle2 size={40} className="text-slate-700 mx-auto mb-3" />
-          <p className="text-slate-400 font-semibold">No pending requests</p>
-          <p className="text-slate-500 text-sm">
-            All good! No elections currently need approval.
-          </p>
+        <div className="text-center py-12 border border-dashed border-hairline rounded-xl bg-canvas">
+          <CheckCircle2 size={36} className="text-primary mx-auto mb-3" />
+          <p className="text-ink font-semibold">Approvals list clear</p>
+          <p className="text-body text-xs mt-1">There are no pending Go-Live requests at this time.</p>
         </div>
       ) : (
         <div className="space-y-4">
-          {elections.map((e) => (
-            <div
-              key={e._id}
-              className="bg-slate-900/60 border border-amber-900/50 rounded-2xl p-5 flex flex-col md:flex-row items-center justify-between gap-5 transition hover:border-amber-700/50"
-            >
-              <div className="flex-1 min-w-0">
-                <div className="flex items-center gap-2 mb-1">
-                  <span className="text-xs bg-amber-950/80 text-amber-400 border border-amber-800/50 px-2 py-0.5 rounded uppercase font-bold tracking-wider animate-pulse">
-                    Action Required
-                  </span>
-                  <span className="text-slate-500 text-xs font-mono">
-                    ID: {e.electionId}
+          {elections.map((e) => {
+            const hasApproved = e.approvedBy?.some(addr => addr.toLowerCase() === account.toLowerCase());
+            return (
+              <div key={e._id || e.id} className="bg-canvas border border-hairline rounded-xl p-5 shadow-sm space-y-4">
+                <div className="flex justify-between items-start">
+                  <div>
+                    <h4 className="font-semibold text-ink text-base">{e.title}</h4>
+                    <p className="text-body text-xs mt-0.5">{e.description}</p>
+                    <p className="text-muted text-[10px] mt-1 uppercase font-semibold">Org Slug: {e.orgSlug} · Ballot ID: {e.id}</p>
+                  </div>
+                  <span className="text-xs font-mono font-semibold bg-surface-strong px-2.5 py-1 rounded-full text-ink">
+                    Approvals: {e.approvalsCount || 0} / {APPROVAL_THRESHOLD}
                   </span>
                 </div>
-                <h3 className="text-white font-bold text-lg truncate">
-                  {e.title}
-                </h3>
-                <p className="text-slate-400 text-sm mb-2">{e.description}</p>
-                <div className="flex flex-wrap gap-x-4 gap-y-1 text-xs text-slate-500">
-                  <span className="flex items-center gap-1">
-                    <Building2 size={12} className="text-indigo-400" />{" "}
-                    {e.org?.name || e.orgSlug}
-                  </span>
-                  <span>
-                    Candidates:{" "}
-                    <strong className="text-slate-300">
-                      {e.candidateCount}
-                    </strong>
-                  </span>
-                  <span>Start: {new Date(e.startTime).toLocaleString()}</span>
-                </div>
-              </div>
-              <div className="flex items-center gap-2 shrink-0">
-                <button
-                  onClick={() => handleAction(e.electionId, "reject")}
-                  disabled={actioning === e.electionId}
-                  className="px-4 py-2 text-sm font-semibold text-red-400 hover:text-white border border-red-900 hover:bg-red-600 rounded-xl transition disabled:opacity-50"
-                >
-                  Reject
-                </button>
-                <button
-                  onClick={() => handleAction(e.electionId, "approve")}
-                  disabled={actioning === e.electionId}
-                  className="flex items-center gap-2 px-5 py-2 text-sm font-bold bg-green-600 hover:bg-green-500 text-white rounded-xl transition shadow-lg shadow-green-900/40 disabled:opacity-50"
-                >
-                  {actioning === e.electionId ? (
-                    <Loader2 size={14} className="animate-spin" />
+
+                {e.approvedBy?.length > 0 && (
+                  <div className="bg-surface-soft p-3 rounded-lg border border-hairline">
+                    <p className="text-[10px] font-semibold text-body uppercase tracking-wider mb-1.5">Approved Guardians</p>
+                    <div className="space-y-1 font-mono text-[10px] text-body">
+                      {e.approvedBy.map((addr, i) => (
+                        <div key={i} className="flex items-center gap-1">
+                          <CheckCircle2 size={10} className="text-primary" />
+                          <span>{addr}</span>
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                )}
+
+                <div className="flex gap-2">
+                  {hasApproved ? (
+                    <span className="text-xs font-semibold text-primary bg-primary/10 border border-primary/20 px-4 py-2 rounded-full flex items-center gap-1.5">
+                      <CheckCircle2 size={13} /> Signed by You
+                    </span>
                   ) : (
-                    <Shield size={14} />
+                    <button
+                      onClick={() => handleAction(e.id, 'approve')}
+                      disabled={actioning === e.id}
+                      className="bg-primary hover:bg-primary-active text-white text-xs font-semibold px-4 py-2 rounded-full cursor-pointer transition shadow-sm"
+                    >
+                      {actioning === e.id ? <Loader2 size={12} className="animate-spin" /> : 'Co-sign Release'}
+                    </button>
                   )}
-                  Approve & Go Live
-                </button>
+                  <button
+                    onClick={() => handleAction(e.id, 'reject')}
+                    disabled={actioning === e.id}
+                    className="border border-red-250 hover:bg-red-50 text-semantic-down text-xs font-semibold px-4 py-2 rounded-full cursor-pointer transition"
+                  >
+                    Reject Ballot
+                  </button>
+                </div>
               </div>
-            </div>
-          ))}
+            );
+          })}
         </div>
       )}
     </div>
   );
 }
 
-// ── Organizations Tab ──────────────────────────────────────────────────────────
-function OrgsTab() {
-  const [orgs, setOrgs] = useState([]);
+// ── Results Tab ──────────────────────────────────────────────────────────────
+function ResultsTab({ slug }) {
+  const [elections, setElections] = useState([]);
   const [loading, setLoading] = useState(true);
+  const [selectedElection, setSelectedElection] = useState(null);
 
   const load = useCallback(async () => {
     setLoading(true);
     try {
-      const r = await fetch("/api/admin/orgs");
+      const r = await fetch('/api/admin/elections?filter=completed');
       const d = await r.json();
-      setOrgs(d.orgs || []);
+      setElections(d.elections || []);
     } catch {}
     setLoading(false);
   }, []);
 
-  useEffect(() => {
-    load();
-  }, [load]);
+  useEffect(() => { load(); }, [load]);
 
-  const toggleVerify = async (id, isVerified) => {
+  return (
+    <div className="space-y-6">
+      <div className="flex items-center justify-between border-b border-hairline pb-4">
+        <div>
+          <h3 className="text-lg font-semibold text-ink">Completed Elections</h3>
+          <p className="text-xs text-body mt-0.5">Browse final outcomes stored on-chain.</p>
+        </div>
+        <button onClick={load} className="flex items-center gap-1.5 text-xs text-body hover:text-ink border border-hairline px-3 py-1.5 rounded-full bg-canvas cursor-pointer">
+          <RefreshCw size={12} /> Sync
+        </button>
+      </div>
+
+      {loading ? (
+        <div className="flex justify-center py-10"><Loader2 className="animate-spin text-primary" size={24} /></div>
+      ) : elections.length === 0 ? (
+        <div className="text-center py-12 border border-dashed border-hairline rounded-xl bg-canvas">
+          <Trophy size={36} className="text-muted mx-auto mb-3" />
+          <p className="text-ink font-semibold">No records archived</p>
+          <p className="text-body text-xs mt-1">There are no completed elections registered on-chain.</p>
+        </div>
+      ) : (
+        <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+          <div className="space-y-2">
+            {elections.map((e) => (
+              <button
+                key={e._id || e.id}
+                onClick={() => setSelectedElection(e)}
+                className={`w-full text-left p-4 rounded-lg border transition ${
+                  selectedElection?.id === e.id
+                    ? 'border-primary bg-primary/5 shadow-sm'
+                    : 'border-hairline bg-canvas hover:border-body'
+                }`}
+              >
+                <h4 className="font-semibold text-ink text-sm leading-snug">{e.title}</h4>
+                <p className="text-body text-[11px] mt-0.5 truncate">{e.description}</p>
+                <p className="text-[10px] text-muted font-mono mt-1">ID: {e.id} · Org: {e.orgSlug}</p>
+              </button>
+            ))}
+          </div>
+
+          <div className="bg-canvas border border-hairline rounded-xl p-5 shadow-sm">
+            {selectedElection ? (
+              <ElectionResults slug={selectedElection.orgSlug} electionId={selectedElection.id} electionTitle={selectedElection.title} compact />
+            ) : (
+              <div className="h-full flex flex-col justify-center items-center text-center py-12">
+                <BarChart3 size={32} className="text-muted mb-2 animate-pulse" />
+                <p className="text-body text-xs">Select an election from the list to display official tally charts.</p>
+              </div>
+            )}
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
+
+// ── Orgs Tab ──────────────────────────────────────────────────────────────────
+function OrgsTab() {
+  const [orgs, setOrgs] = useState([]);
+  const [loading, setLoading] = useState(true);
+  const [actioning, setActioning] = useState(null);
+  const [msg, setMsg] = useState(null);
+
+  const load = useCallback(async () => {
+    setLoading(true);
     try {
-      await fetch("/api/admin/orgs/verify", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ id, isVerified }),
-      });
-      load();
+      const r = await fetch('/api/admin/orgs');
+      const d = await r.json();
+      setOrgs(d.organizations || []);
     } catch {}
+    setLoading(false);
+  }, []);
+
+  useEffect(() => { load(); }, [load]);
+
+  const handleVerify = async (orgId, isVerified) => {
+    setMsg(null);
+    setActioning(orgId);
+    try {
+      const r = await fetch('/api/admin/orgs/verify', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ orgId, isVerified }),
+      });
+      const d = await r.json();
+      if (!r.ok) throw new Error(d.error);
+      setMsg({ type: 'success', text: d.message });
+      load();
+    } catch (e) {
+      setMsg({ type: 'error', text: e.message });
+    }
+    setActioning(null);
   };
 
   return (
     <div className="space-y-6">
-      <div className="flex items-center justify-between">
-        <h2 className="text-xl font-bold">Organizations Overview</h2>
-        <button
-          onClick={load}
-          className="flex items-center gap-1.5 text-xs bg-slate-900 border border-slate-700 hover:border-indigo-500 px-3 py-2 rounded-xl transition"
-        >
-          <RefreshCw size={12} /> Refresh
+      <div className="flex items-center justify-between border-b border-hairline pb-4">
+        <div>
+          <h3 className="text-lg font-semibold text-ink">Organizations Register</h3>
+          <p className="text-xs text-body mt-0.5">Control registration validation for platform organizations.</p>
+        </div>
+        <button onClick={load} className="flex items-center gap-1.5 text-xs text-body hover:text-ink border border-hairline px-3 py-1.5 rounded-full bg-canvas cursor-pointer">
+          <RefreshCw size={12} /> Sync
         </button>
       </div>
+
+      {msg && <Toast type={msg.type} msg={msg.text} />}
+
       {loading ? (
-        <div className="flex justify-center py-10">
-          <Loader2 className="animate-spin text-indigo-500" size={30} />
+        <div className="flex justify-center py-10"><Loader2 className="animate-spin text-primary" size={24} /></div>
+      ) : orgs.length === 0 ? (
+        <div className="text-center py-12 border border-dashed border-hairline rounded-xl bg-canvas">
+          <Building2 size={36} className="text-muted mx-auto mb-3" />
+          <p className="text-ink font-semibold">Register is empty</p>
         </div>
       ) : (
-        <div className="overflow-x-auto rounded-2xl border border-slate-800">
-          <table className="w-full text-sm text-left">
-            <thead className="bg-slate-900/80 text-slate-400 text-xs uppercase tracking-wider">
-              <tr>
-                <th className="px-4 py-3">Organization</th>
-                <th className="px-4 py-3">Slug</th>
-                <th className="px-4 py-3">Contact</th>
-                <th className="px-4 py-3 text-right">Verification</th>
+        <div className="overflow-x-auto border border-hairline rounded-xl bg-canvas">
+          <table className="w-full text-sm">
+            <thead>
+              <tr className="bg-surface-soft border-b border-hairline text-body text-xs">
+                <th className="text-left px-5 py-3 font-semibold">Name / Slug</th>
+                <th className="text-left px-5 py-3 font-semibold">Admin Account</th>
+                <th className="text-left px-5 py-3 font-semibold">Category</th>
+                <th className="text-left px-5 py-3 font-semibold">Verify Status</th>
               </tr>
             </thead>
-            <tbody className="divide-y divide-slate-800/60">
+            <tbody className="divide-y divide-hairline">
               {orgs.map((o) => (
-                <tr
-                  key={o._id}
-                  className="bg-slate-950/40 hover:bg-slate-900/40 transition"
-                >
-                  <td className="px-4 py-3 font-medium text-white">{o.name}</td>
-                  <td className="px-4 py-3 font-mono text-slate-500">
-                    {o.slug}
+                <tr key={o._id} className="hover:bg-surface-soft/40 transition">
+                  <td className="px-5 py-3">
+                    <p className="text-ink font-semibold text-sm">{o.name}</p>
+                    <p className="text-body font-mono text-[10px] mt-0.5">Slug: {o.slug}</p>
                   </td>
-                  <td className="px-4 py-3 text-slate-400">{o.adminEmail}</td>
-                  <td className="px-4 py-3 text-right">
-                    <button
-                      onClick={() => toggleVerify(o._id, !o.isVerified)}
-                      className={`text-xs px-3 py-1 rounded-full font-bold transition border ${
-                        o.isVerified
-                          ? "bg-green-950/40 text-green-400 border-green-800 hover:bg-red-950/40 hover:text-red-400 hover:border-red-800"
-                          : "bg-slate-900 text-slate-400 border-slate-700 hover:bg-green-950/40 hover:text-green-400 hover:border-green-800"
-                      }`}
-                    >
-                      {o.isVerified ? "Verified" : "Unverified"}
-                    </button>
+                  <td className="px-5 py-3 text-body font-mono text-xs">{o.adminEmail}</td>
+                  <td className="px-5 py-3 text-body text-xs capitalize">{o.type || 'Organization'}</td>
+                  <td className="px-5 py-3">
+                    <div className="flex items-center gap-2">
+                      <span className={`text-xs px-2.5 py-0.5 rounded-full border font-semibold ${
+                        o.verified ? 'bg-green-50 text-green-700 border-green-200' : 'bg-amber-50 text-amber-700 border-amber-200'
+                      }`}>
+                        {o.verified ? 'Verified' : 'Pending Approval'}
+                      </span>
+                      {o.verified ? (
+                        <button
+                          onClick={() => handleVerify(o._id, false)}
+                          disabled={actioning === o._id}
+                          className="text-[10px] text-semantic-down hover:underline font-semibold cursor-pointer"
+                        >
+                          Revoke
+                        </button>
+                      ) : (
+                        <button
+                          onClick={() => handleVerify(o._id, true)}
+                          disabled={actioning === o._id}
+                          className="text-[10px] text-primary hover:underline font-semibold cursor-pointer"
+                        >
+                          Approve
+                        </button>
+                      )}
+                    </div>
                   </td>
                 </tr>
               ))}
@@ -267,192 +344,644 @@ function OrgsTab() {
   );
 }
 
-// ── Gas Station Tab ────────────────────────────────────────────────────────────
-function GasStationTab() {
-  const [data, setData] = useState({ balance: "0.0", address: "" });
+// ── Gas Logistics Tab ─────────────────────────────────────────────────────────
+function GasTab() {
+  const [gasData, setGasData] = useState(null);
   const [loading, setLoading] = useState(true);
+  const [msg, setMsg] = useState(null);
+  const [funding, setFunding] = useState(false);
 
   const load = useCallback(async () => {
     setLoading(true);
     try {
-      const r = await fetch("/api/relay/status");
+      const r = await fetch('/api/admin/gas');
       const d = await r.json();
-      setData(d);
+      setGasData(d);
     } catch {}
     setLoading(false);
   }, []);
 
-  useEffect(() => {
-    load();
-  }, [load]);
+  useEffect(() => { load(); }, [load]);
+
+  const triggerFunding = async () => {
+    setFunding(true);
+    setMsg(null);
+    try {
+      const r = await fetch('/api/admin/gas/fund', { method: 'POST' });
+      const d = await r.json();
+      if (!r.ok) throw new Error(d.error);
+      setMsg({ type: 'success', text: d.message || 'Gas station refueled!' });
+      load();
+    } catch (e) {
+      setMsg({ type: 'error', text: e.message });
+    }
+    setFunding(false);
+  };
+
+  const getGasStatus = (balanceStr) => {
+    const bal = parseFloat(balanceStr || '0');
+    if (bal >= 0.1) {
+      return (
+        <span className="inline-flex items-center gap-1.5 text-xs font-semibold px-2.5 py-0.5 rounded-full border bg-emerald-50 text-emerald-700 border-emerald-200">
+          <span className="w-1.5 h-1.5 rounded-full bg-emerald-500" />
+          Healthy Reserve
+        </span>
+      );
+    } else if (bal > 0.02) {
+      return (
+        <span className="inline-flex items-center gap-1.5 text-xs font-semibold px-2.5 py-0.5 rounded-full border bg-amber-50 text-amber-700 border-amber-200">
+          <span className="w-1.5 h-1.5 rounded-full bg-amber-500" />
+          Low Reserve
+        </span>
+      );
+    } else {
+      return (
+        <span className="inline-flex items-center gap-1.5 text-xs font-semibold px-2.5 py-0.5 rounded-full border bg-red-50 text-red-700 border-red-200">
+          <span className="w-1.5 h-1.5 rounded-full bg-red-500 animate-pulse" />
+          Action Required
+        </span>
+      );
+    }
+  };
 
   return (
-    <div className="space-y-6 max-w-2xl">
-      <div className="flex items-center justify-between">
-        <h2 className="text-xl font-bold">Relay Wallet Reserve</h2>
-        <button
-          onClick={load}
-          className="flex items-center gap-1.5 text-xs bg-slate-900 border border-slate-700 hover:border-indigo-500 px-3 py-2 rounded-xl transition"
-        >
-          <RefreshCw size={12} /> Refresh
+    <div className="space-y-6">
+      <div className="flex items-center justify-between border-b border-hairline pb-4">
+        <div>
+          <h3 className="text-lg font-semibold text-ink">Gas Logistics</h3>
+          <p className="text-xs text-body mt-0.5">Monitor system reserves for Relayer node voter transactions.</p>
+        </div>
+        <button onClick={load} className="flex items-center gap-1.5 text-xs text-body hover:text-ink border border-hairline px-3 py-1.5 rounded-full bg-canvas cursor-pointer">
+          <RefreshCw size={12} /> Sync
         </button>
       </div>
-      <div className="bg-slate-900/60 border border-slate-800 rounded-2xl p-6 relative overflow-hidden">
-        <div className="absolute top-0 right-0 w-32 h-32 bg-cyan-500/10 rounded-full blur-3xl pointer-events-none" />
-        <p className="text-slate-400 text-sm mb-2">Available Gas Balance</p>
-        <div className="flex items-end gap-3 mb-6">
-          <span className="text-5xl font-black bg-gradient-to-r from-cyan-400 to-blue-500 bg-clip-text text-transparent">
-            {loading ? "..." : data.balance}
-          </span>
-          <span className="text-xl text-slate-500 font-bold mb-1">ETH</span>
+
+      {msg && <Toast type={msg.type} msg={msg.text} />}
+
+      {loading ? (
+        <div className="flex justify-center py-10"><Loader2 className="animate-spin text-primary" size={24} /></div>
+      ) : (
+        <div className="space-y-6">
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+            
+            {/* Relayer Reserve */}
+            <div className="bg-canvas border border-hairline rounded-xl p-5 shadow-sm">
+              <h4 className="text-xs font-semibold text-body uppercase tracking-wider mb-4 flex items-center gap-2">
+                <Fuel size={14} className="text-primary" /> Relayer Gas Reserve
+              </h4>
+              <div className="space-y-2 text-sm">
+                <div className="flex justify-between">
+                  <span className="text-muted">Account Address</span>
+                  <code className="text-ink font-mono text-xs">{gasData?.relayerAddress}</code>
+                </div>
+                <div className="flex justify-between border-t border-hairline pt-3 items-center">
+                  <span className="text-muted">Current Balance</span>
+                  <span className="text-ink font-bold font-mono text-xs">{gasData?.relayerBalanceETH} ETH</span>
+                </div>
+                <div className="flex justify-between border-t border-hairline pt-3 items-center">
+                  <span className="text-muted">Reserve Status</span>
+                  {getGasStatus(gasData?.relayerBalanceETH)}
+                </div>
+              </div>
+            </div>
+
+            {/* Gas Station Multisig */}
+            <div className="bg-canvas border border-hairline rounded-xl p-5 shadow-sm">
+              <h4 className="text-xs font-semibold text-body uppercase tracking-wider mb-4 flex items-center gap-2">
+                <Database size={14} className="text-primary" /> Gas Station Reserve
+              </h4>
+              <div className="space-y-2 text-sm">
+                <div className="flex justify-between">
+                  <span className="text-muted">Account Address</span>
+                  <code className="text-ink font-mono text-xs">{gasData?.gasStationAddress}</code>
+                </div>
+                <div className="flex justify-between border-t border-hairline pt-3 items-center">
+                  <span className="text-muted">Current Balance</span>
+                  <span className="text-ink font-bold font-mono text-xs">{gasData?.gasStationBalanceETH} ETH</span>
+                </div>
+                <div className="flex justify-between border-t border-hairline pt-3 items-center">
+                  <span className="text-muted">Reserve Status</span>
+                  {getGasStatus(gasData?.gasStationBalanceETH)}
+                </div>
+              </div>
+            </div>
+
+          </div>
+
+          <div className="bg-canvas border border-hairline rounded-xl p-5 shadow-sm text-center space-y-4">
+            <h4 className="text-sm font-semibold text-ink">Refuel System Gas Station</h4>
+            <p className="text-body text-xs max-w-md mx-auto">
+              If reserves run low, request a mock refuel of Gas Station Node to maintain uninterrupted voter validation relays.
+            </p>
+            <button
+              onClick={triggerFunding}
+              disabled={funding}
+              className="inline-flex items-center gap-2 bg-primary hover:bg-primary-active disabled:opacity-50 text-white text-xs font-semibold px-6 py-2.5 rounded-full cursor-pointer shadow-sm transition"
+            >
+              {funding ? <Loader2 size={12} className="animate-spin" /> : <Fuel size={12} />}
+              <span>Refuel Gas Station</span>
+            </button>
+          </div>
         </div>
-        <div className="bg-slate-950 rounded-xl p-3 border border-slate-800">
-          <p className="text-xs text-slate-500 mb-1">
-            Relay Wallet Address (fund this to pay for voter gas)
-          </p>
-          <code className="text-cyan-300 font-mono text-sm break-all">
-            {data.address || "Loading..."}
-          </code>
-        </div>
-      </div>
+      )}
     </div>
   );
 }
 
-// ── Main Page ──────────────────────────────────────────────────────────────────
-export default function AdminDashboardPage() {
-  const router = useRouter();
-  const { account, disconnect } = useWallet();
-  const [gid, setGid] = useState(null);
-  const [tab, setTab] = useState("approvals");
+// ── Governance Tab ────────────────────────────────────────────────────────────
+function GovTab() {
+  const { contract, readContract, account } = useWallet();
+  const [govData, setGovData] = useState(null);
+  const [loading, setLoading] = useState(true);
+  const [currentVersion, setCurrentVersion] = useState('1.0.0');
+  const [proposalCount, setProposalCount] = useState(0);
+  const [proposals, setProposals] = useState([]);
+  
+  // Propose Upgrade State
+  const [newImpl, setNewImpl] = useState('');
+  const [submitting, setSubmitting] = useState(false);
+  const [msg, setMsg] = useState(null);
 
-  useEffect(() => {
-    const id = sessionStorage.getItem("active_guardian_id");
-    const addr = sessionStorage.getItem("active_guardian_address");
-    if (
-      !id ||
-      !addr ||
-      (account && addr.toLowerCase() !== account.toLowerCase())
-    ) {
-      router.replace("/admin-auth");
-    } else {
-      setGid(id);
+  const load = useCallback(async () => {
+    setLoading(true);
+    setMsg(null);
+    try {
+      const r = await fetch('/api/admin/governance');
+      const d = await r.json();
+      setGovData(d);
+
+      if (readContract) {
+        // Read version
+        try {
+          const ver = await readContract.version();
+          setCurrentVersion(ver);
+        } catch (e) {
+          console.warn('version error:', e);
+        }
+
+        // Read proposal count
+        try {
+          const pCount = await readContract.proposalCount();
+          setProposalCount(Number(pCount));
+          
+          const props = [];
+          for (let i = 0; i < Number(pCount); i++) {
+            const p = await readContract.getUpgradeProposal(i);
+            // p is: [address impl, uint256 approvals, bool executed]
+            let approvedByMe = false;
+            if (account) {
+              approvedByMe = await readContract.hasGuardianApproved(i, account);
+            }
+            props.push({
+              id: i,
+              impl: p[0] || p.impl,
+              approvals: Number(p[1] || p.approvals),
+              executed: p[2] || p.executed,
+              approvedByMe,
+            });
+          }
+          setProposals(props.reverse()); // Show newest first
+        } catch (e) {
+          console.warn('proposals read error:', e);
+        }
+      }
+    } catch {}
+    setLoading(false);
+  }, [readContract, account]);
+
+  useEffect(() => { load(); }, [load]);
+
+  const handlePropose = async (e) => {
+    e.preventDefault();
+    if (!newImpl || !contract) return;
+    setSubmitting(true);
+    setMsg(null);
+    try {
+      const tx = await contract.proposeUpgrade(newImpl);
+      setMsg({ type: 'success', text: 'Upgrade Proposed. Waiting for transaction confirmation...' });
+      await tx.wait();
+      setMsg({ type: 'success', text: 'Upgrade proposed successfully on-chain! Guardians must now co-sign.' });
+      setNewImpl('');
+      load();
+    } catch (err) {
+      setMsg({ type: 'error', text: err.reason || err.message || 'Upgrade proposal failed.' });
     }
-  }, [account, router]);
-
-  const logout = () => {
-    sessionStorage.removeItem("active_guardian_id");
-    sessionStorage.removeItem("active_guardian_address");
-    disconnect();
-    router.replace("/admin-auth");
+    setSubmitting(false);
   };
 
-  if (!gid)
-    return (
-      <div className="min-h-screen bg-[#020617] flex justify-center items-center">
-        <Loader2 size={30} className="animate-spin text-indigo-500" />
-      </div>
-    );
+  const handleApprove = async (id) => {
+    if (!contract) return;
+    setSubmitting(true);
+    setMsg(null);
+    try {
+      const tx = await contract.approveUpgrade(id);
+      setMsg({ type: 'success', text: 'Signing approval... Please confirm in MetaMask.' });
+      await tx.wait();
+      setMsg({ type: 'success', text: `Proposal #${id} approved successfully!` });
+      load();
+    } catch (err) {
+      setMsg({ type: 'error', text: err.reason || err.message || 'Approval transaction failed.' });
+    }
+    setSubmitting(false);
+  };
+
+  const handleExecute = async (id) => {
+    if (!contract) return;
+    setSubmitting(true);
+    setMsg(null);
+    try {
+      const tx = await contract.executeUpgrade(id);
+      setMsg({ type: 'success', text: 'Executing UUPS upgrade transaction...' });
+      await tx.wait();
+      setMsg({ type: 'success', text: `UUPS upgrade executed successfully! Proxy contract logic is now upgraded.` });
+      load();
+    } catch (err) {
+      setMsg({ type: 'error', text: err.reason || err.message || 'Execution transaction failed.' });
+    }
+    setSubmitting(false);
+  };
 
   return (
-    <div className="min-h-screen bg-[#020617] text-white flex flex-col md:flex-row">
-      {/* ── Sidebar ── */}
-      <aside className="w-full md:w-64 border-r border-white/5 bg-slate-950/60 flex flex-col shrink-0 min-h-screen">
+    <div className="space-y-6">
+      <div className="flex items-center justify-between border-b border-hairline pb-4">
+        <div>
+          <h3 className="text-lg font-semibold text-ink">Governance & UUPS Protocol</h3>
+          <p className="text-xs text-body mt-0.5">Underlying Solidity smart contracts config parameters & live upgrade portal.</p>
+        </div>
+        <button onClick={load} className="flex items-center gap-1.5 text-xs text-body hover:text-ink border border-hairline px-3 py-1.5 rounded-full bg-canvas cursor-pointer">
+          <RefreshCw size={12} /> Sync
+        </button>
+      </div>
+
+      {msg && <Toast type={msg.type} msg={msg.text} />}
+
+      {loading ? (
+        <div className="flex justify-center py-10"><Loader2 className="animate-spin text-primary" size={24} /></div>
+      ) : (
+        <div className="space-y-6">
+          {/* Specs */}
+          <div className="bg-canvas border border-hairline rounded-xl p-5 shadow-sm space-y-4 text-sm">
+            <div className="flex justify-between border-b border-hairline pb-2">
+              <span className="text-muted font-medium">Platform Proxy Address</span>
+              <code className="text-ink font-mono text-xs select-all">{govData?.contractAddress}</code>
+            </div>
+            <div className="flex justify-between border-b border-hairline pb-2">
+              <span className="text-muted font-medium">UUPS Implementation Address</span>
+              <code className="text-ink font-mono text-xs select-all">{govData?.implementationAddress}</code>
+            </div>
+            <div className="flex justify-between border-b border-hairline pb-2">
+              <span className="text-muted font-medium">Contract Version</span>
+              <span className="text-primary font-bold font-mono text-xs">v{currentVersion}</span>
+            </div>
+            <div className="flex justify-between border-b border-hairline pb-2">
+              <span className="text-muted font-medium">Multi-Sig Co-signers</span>
+              <span className="text-ink font-mono font-medium">{govData?.guardiansCount || 3} Guardians</span>
+            </div>
+            <div className="flex justify-between">
+              <span className="text-muted font-medium">Consensus Threshold</span>
+              <span className="text-ink font-mono font-medium">{govData?.threshold || 2} Signatures</span>
+            </div>
+          </div>
+
+          {/* Propose Form */}
+          <div className="bg-canvas border border-hairline rounded-xl p-5 shadow-sm space-y-4">
+            <div className="flex items-center justify-between gap-3">
+              <h4 className="font-semibold text-ink text-sm">Propose New Implementation</h4>
+              {govData?.implementationAddress && currentVersion !== '1.0.0' && (
+                <button
+                  type="button"
+                  onClick={() => {
+                    setNewImpl(govData.implementationAddress);
+                    setMsg({ type: 'success', text: `V1 Address pre-filled: ${govData.implementationAddress}. Click 'Submit Proposal' to initiate the rollback.` });
+                  }}
+                  className="text-xs text-primary hover:underline font-semibold cursor-pointer"
+                >
+                  ↩️ Rollback to V1
+                </button>
+              )}
+            </div>
+            <form onSubmit={handlePropose} className="flex flex-col sm:flex-row gap-3">
+              <input
+                type="text"
+                required
+                placeholder="Paste V2 Implementation Address (0x...)"
+                value={newImpl}
+                onChange={(e) => setNewImpl(e.target.value)}
+                disabled={submitting}
+                className="flex-1 bg-canvas border border-hairline rounded-full px-4 py-2.5 text-xs text-ink focus:outline-none focus:border-primary transition"
+              />
+              <button
+                type="submit"
+                disabled={submitting || !contract}
+                className="bg-primary hover:bg-primary-active disabled:opacity-50 text-white text-xs font-semibold px-6 py-2.5 rounded-full cursor-pointer shadow-sm transition"
+              >
+                {submitting ? <Loader2 size={12} className="animate-spin" /> : 'Submit Proposal'}
+              </button>
+            </form>
+          </div>
+
+          {/* Upgrade Proposals List */}
+          <div className="space-y-4">
+            <h4 className="font-semibold text-ink text-sm">Active Upgrade Proposals ({proposalCount})</h4>
+            {proposals.length === 0 ? (
+              <div className="text-center py-8 border border-dashed border-hairline rounded-xl bg-canvas text-body text-xs">
+                No contract upgrade proposals registered yet.
+              </div>
+            ) : (
+              <div className="space-y-3">
+                {proposals.map((p) => (
+                  <div key={p.id} className="bg-canvas border border-hairline rounded-xl p-4 shadow-sm flex flex-col sm:flex-row sm:items-center justify-between gap-4 font-sans">
+                    <div className="space-y-1">
+                      <div className="flex items-center gap-2">
+                        <span className="text-xs font-bold text-ink">Proposal #{p.id}</span>
+                        {p.executed ? (
+                          <span className="text-[10px] bg-green-50 border border-green-200 text-green-700 font-semibold px-2 py-0.5 rounded-full">
+                            Executed (Logic Upgraded)
+                          </span>
+                        ) : p.approvals >= 2 ? (
+                          <span className="text-[10px] bg-indigo-50 border border-indigo-200 text-indigo-700 font-semibold px-2 py-0.5 rounded-full animate-pulse">
+                            Ready to Execute
+                          </span>
+                        ) : (
+                          <span className="text-[10px] bg-amber-50 border border-amber-200 text-amber-700 font-semibold px-2 py-0.5 rounded-full">
+                            Pending Consensuses ({p.approvals}/2)
+                          </span>
+                        )}
+                      </div>
+                      <p className="text-[11px] text-body">
+                        New Logic Address: <code className="font-mono bg-surface-soft px-1.5 py-0.5 rounded text-ink text-[10px]">{p.impl}</code>
+                      </p>
+                    </div>
+
+                    <div className="flex items-center gap-2">
+                      {!p.executed && (
+                        <>
+                          {p.approvedByMe ? (
+                            <span className="text-[11px] font-semibold text-primary bg-primary/10 border border-primary/20 px-3 py-1.5 rounded-full flex items-center gap-1">
+                              <CheckCircle2 size={11} /> Approved
+                            </span>
+                          ) : (
+                            <button
+                              onClick={() => handleApprove(p.id)}
+                              disabled={submitting}
+                              className="bg-primary hover:bg-primary-active text-white text-xs font-semibold px-4 py-1.5 rounded-full cursor-pointer transition shadow-sm"
+                            >
+                              Approve
+                            </button>
+                          )}
+                          {p.approvals >= 2 && (
+                            <button
+                              onClick={() => handleExecute(p.id)}
+                              disabled={submitting}
+                              className="bg-emerald-600 hover:bg-emerald-700 text-white text-xs font-semibold px-4 py-1.5 rounded-full cursor-pointer transition shadow-sm"
+                            >
+                              Execute Upgrade
+                            </button>
+                          )}
+                        </>
+                      )}
+                    </div>
+                  </div>
+                ))}
+              </div>
+            )}
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
+
+// ── Main Page ────────────────────────────────────────────────────────────────
+export default function AdminDashboardPage() {
+  const router = useRouter();
+  const { account, readContract, provider, disconnect } = useWallet();
+  const [guardian, setGuardian] = useState(null);
+  const [activeTab, setActiveTab] = useState('approvals');
+  const [guardiansList, setGuardiansList] = useState([]);
+  const [networkName, setNetworkName] = useState('Checking network...');
+
+  // Get network name from active MetaMask provider
+  useEffect(() => {
+    if (provider) {
+      provider.getNetwork()
+        .then(net => {
+          const chainId = Number(net.chainId);
+          if (chainId === 11155111) {
+            setNetworkName(`Sepolia Testnet (ID: ${chainId})`);
+          } else if (chainId === 1337 || chainId === 31337) {
+            setNetworkName(`Hardhat Local (ID: ${chainId})`);
+          } else {
+            setNetworkName(net.name || `Chain ${chainId}`);
+          }
+        })
+        .catch(() => setNetworkName('Unknown Network'));
+    } else {
+      setNetworkName('Offline (RPC default)');
+    }
+  }, [provider]);
+
+  // Fetch latest guardians list from contract
+  useEffect(() => {
+    if (readContract && typeof readContract.getGuardians === 'function') {
+      readContract.getGuardians()
+        .then(list => {
+          if (list?.length === 3) setGuardiansList(list);
+        })
+        .catch(err => console.warn(err));
+    }
+  }, [readContract]);
+
+  // Sync MetaMask account changes with sessionStorage guardian profile
+  useEffect(() => {
+    if (!account) {
+      // If wallet disconnected, check if we have a session, otherwise redirect
+      const address = sessionStorage.getItem('active_guardian_address');
+      const id = sessionStorage.getItem('active_guardian_id');
+      if (!address || !id) {
+        router.replace('/admin-auth');
+      } else {
+        setGuardian({ id, address });
+      }
+      return;
+    }
+
+    const checkAccount = () => {
+      const list = guardiansList.length > 0 ? guardiansList : [
+        process.env.NEXT_PUBLIC_GUARDIAN_1 || '0xcda674D670C0b9Fc8C5037a21F00C8D7Db380f9A',
+        process.env.NEXT_PUBLIC_GUARDIAN_2 || '0xBf0353eA5cD869e3707B326722Cf8492A0201fbB',
+        process.env.NEXT_PUBLIC_GUARDIAN_3 || '0x7b359a8ca8a9419d6Ed0392641B6BE18df79dE84'
+      ];
+      const idx = list.findIndex(g => g.toLowerCase() === account.toLowerCase());
+
+      if (idx !== -1) {
+        const gId = String(idx + 1);
+        sessionStorage.setItem('active_guardian_id', gId);
+        sessionStorage.setItem('active_guardian_address', account);
+        setGuardian({ id: gId, address: account });
+      } else {
+        // If switched to an unauthorized account, boot to auth gate
+        sessionStorage.removeItem('active_guardian_id');
+        sessionStorage.removeItem('active_guardian_address');
+        setGuardian(null);
+        router.replace('/admin-auth');
+      }
+    };
+
+    checkAccount();
+  }, [account, guardiansList, router]);
+
+  const handleLogout = () => {
+    sessionStorage.removeItem('active_guardian_id');
+    sessionStorage.removeItem('active_guardian_address');
+    disconnect();
+    router.replace('/admin-auth');
+  };
+
+  if (!guardian) {
+    return (
+      <div className="min-h-screen bg-canvas flex items-center justify-center">
+        <Loader2 size={32} className="animate-spin text-primary" />
+      </div>
+    );
+  }
+
+  return (
+    <div className="min-h-screen bg-canvas text-ink flex flex-col md:flex-row font-sans">
+      
+      {/* Sidebar - Desktop */}
+      <aside className="hidden md:flex w-64 shrink-0 border-r border-hairline bg-surface-soft flex-col">
         {/* Logo */}
-        <div className="p-5 border-b border-white/5 flex items-center gap-3">
-          <div className="w-8 h-8 rounded-lg bg-indigo-500 flex items-center justify-center">
-            <Shield size={16} className="text-white" />
-          </div>
-          <div>
-            <h1 className="font-black tracking-tight leading-tight">Aegis</h1>
-            <p className="text-xs text-indigo-400 font-semibold tracking-wider">
-              GUARDIAN PORTAL
-            </p>
-          </div>
-        </div>
-
-        {/* Wallet: address + disconnect */}
-        <div className="px-4 pt-4 pb-1">
-          <div className="flex items-center justify-between bg-slate-900 border border-slate-800 rounded-xl px-3 py-2">
-            <div className="flex items-center gap-2 min-w-0">
-              <UserCheck size={12} className="text-green-400 shrink-0" />
-              <span className="text-xs text-slate-400 shrink-0">Voter:</span>
-              <span className="text-xs text-green-400 font-mono truncate">
-                {account
-                  ? `${account.slice(0, 6)}...${account.slice(-4)}`
-                  : "—"}
-              </span>
+        <div className="p-6 border-b border-hairline">
+          <div className="flex items-center gap-2.5">
+            <div className="w-8 h-8 rounded-full bg-primary flex items-center justify-center">
+              <Shield size={16} className="text-white" />
             </div>
-            <button
-              onClick={logout}
-              className="flex items-center gap-1 text-xs text-red-400 hover:text-red-300 border border-red-900/60 hover:border-red-500 px-2 py-1 rounded-lg transition shrink-0 ml-2"
-            >
-              <LogOut size={11} /> Disconnect
-            </button>
+            <span className="font-bold text-ink text-base tracking-tight">Guardian Portal</span>
           </div>
         </div>
 
-        {/* Active session badge */}
-        <div className="p-4 border-b border-white/5">
-          <div className="bg-slate-900/80 border border-slate-700/50 rounded-xl p-3 flex items-center justify-between">
-            <div>
-              <p className="text-xs text-slate-500 uppercase tracking-wider font-semibold">
-                Active Session
-              </p>
-              <p className="font-bold text-sm text-indigo-300">
-                Guardian No. {gid}
-              </p>
+        {/* Profile Card */}
+        <div className="p-4 border-b border-hairline">
+          <div className="bg-canvas border border-hairline rounded-xl p-3.5 shadow-sm">
+            <div className="flex items-center gap-3">
+              <div className="w-9 h-9 rounded-full bg-primary/10 flex items-center justify-center shrink-0 text-primary">
+                <UserCheck size={16} />
+              </div>
+              <div className="min-w-0">
+                <p className="text-ink font-bold text-sm">Guardian #{guardian.id}</p>
+                <p className="text-body text-[10px] font-mono truncate">{guardian.address}</p>
+              </div>
             </div>
-            <div className="w-2 h-2 rounded-full bg-green-500 shadow-[0_0_8px_rgba(34,197,94,0.6)] animate-pulse" />
           </div>
         </div>
 
-        {/* Nav links */}
-        <nav className="flex-1 p-3 space-y-1">
-          {TABS.map((t) => (
-            <button
-              key={t.id}
-              onClick={() => setTab(t.id)}
-              className={`w-full flex items-center gap-3 px-3 py-2.5 rounded-xl text-sm transition ${
-                tab === t.id
-                  ? "bg-indigo-500 text-white font-bold shadow-lg shadow-indigo-500/20"
-                  : "text-slate-400 hover:text-white hover:bg-slate-900 font-semibold"
-              }`}
-            >
-              <t.icon size={16} /> {t.label}
-            </button>
-          ))}
+        {/* Tab Links */}
+        <nav className="flex-1 p-4 space-y-1.5">
+          {TABS.map((tab) => {
+            const Icon = tab.icon;
+            const active = activeTab === tab.id;
+            return (
+              <button
+                key={tab.id}
+                onClick={() => setActiveTab(tab.id)}
+                className={`w-full flex items-center gap-2.5 px-4 py-3 rounded-full text-sm font-semibold transition-all cursor-pointer border ${
+                  active
+                    ? 'bg-primary/10 border-primary/20 text-primary'
+                    : 'bg-transparent border-transparent text-body hover:bg-surface-strong'
+                }`}
+              >
+                <Icon size={15} />
+                <span>{tab.label}</span>
+              </button>
+            );
+          })}
         </nav>
 
-        {/* End session */}
-        <div className="p-4 border-t border-white/5">
+        {/* Signout */}
+        <div className="p-4 border-t border-hairline">
           <button
-            onClick={logout}
-            className="w-full flex items-center justify-center gap-2 px-4 py-2.5 bg-slate-900 hover:bg-red-500/10 border border-slate-800 hover:border-red-500/30 text-slate-400 hover:text-red-400 rounded-xl text-sm font-semibold transition"
+            onClick={handleLogout}
+            className="w-full flex items-center gap-2.5 px-4 py-3 rounded-full text-sm text-semantic-down hover:bg-red-50 transition-all font-semibold cursor-pointer border border-transparent hover:border-red-100"
           >
-            <LogOut size={16} /> End Session
+            <LogOut size={15} />
+            <span>Close Session</span>
           </button>
         </div>
       </aside>
 
-      {/* ── Main content ── */}
-      <main className="flex-1 overflow-auto">
-        <div className="p-8 max-w-5xl">
-          {tab === "approvals" && <ApprovalsTab account={account} />}
-          {tab === "orgs" && <OrgsTab />}
-          {tab === "gas" && <GasStationTab />}
-          {tab === "gov" && (
-            <div className="text-center py-20 border border-slate-800 border-dashed rounded-2xl bg-slate-900/30">
-              <Shield size={40} className="text-slate-700 mx-auto mb-4" />
-              <h2 className="text-xl font-bold mb-1">Protocol Upgrades</h2>
-              <p className="text-slate-500 text-sm max-w-sm mx-auto">
-                No UUPS upgrade proposals are currently pending 2-of-3 multisig
-                verification.
-              </p>
-            </div>
-          )}
+      {/* Mobile Top Bar */}
+      <div className="md:hidden border-b border-hairline bg-canvas px-6 py-4 flex items-center justify-between gap-3 sticky top-0 z-20">
+        <div className="flex items-center gap-2">
+          <div className="w-6 h-6 rounded-full bg-primary flex items-center justify-center text-white">
+            <Shield size={12} />
+          </div>
+          <span className="font-bold text-ink text-sm">Guardian Portal</span>
+        </div>
+        <div className="flex items-center gap-2">
+          <ThemeToggle />
+          <button
+            onClick={handleLogout}
+            className="flex items-center gap-1 text-xs text-semantic-down border border-red-200 bg-red-50/50 px-2.5 py-1.5 rounded-full font-semibold cursor-pointer"
+          >
+            <LogOut size={11} /> Out
+          </button>
+        </div>
+      </div>
+
+      {/* Mobile Tab Swapper */}
+      <div className="md:hidden flex overflow-x-auto bg-surface-soft border-b border-hairline p-2 gap-1 scrollbar-none sticky top-14 z-10">
+        {TABS.map((tab) => {
+          const active = activeTab === tab.id;
+          return (
+            <button
+              key={tab.id}
+              onClick={() => setActiveTab(tab.id)}
+              className={`whitespace-nowrap px-4 py-2 rounded-full text-xs font-semibold uppercase tracking-wider transition ${
+                active ? 'bg-primary text-white' : 'text-body hover:bg-surface-strong'
+              }`}
+            >
+              {tab.label.split(' ')[0]}
+            </button>
+          );
+        })}
+      </div>
+
+      {/* Main Container */}
+      <main className="flex-1 overflow-auto bg-canvas">
+        {/* Breadcrumb Header */}
+        <div className="border-b border-hairline bg-surface-soft/40 px-6 sm:px-10 py-5 flex items-center justify-between gap-3">
+          <div className="min-w-0">
+            <h1 className="text-ink font-semibold text-lg">Aegis Guardian Console</h1>
+            <p className="text-body text-xs truncate mt-0.5">Multi-Signature Consensus Node Administration</p>
+          </div>
+          <div className="flex items-center gap-3 font-sans">
+            <span className={`text-[10px] uppercase font-bold tracking-wider px-2.5 py-1 rounded-full border ${
+              networkName === 'Sepolia Testnet'
+                ? 'bg-purple-50 text-purple-700 border-purple-200'
+                : networkName === 'Hardhat Local'
+                ? 'bg-blue-50 text-blue-700 border-blue-200'
+                : 'bg-amber-50 text-amber-700 border-amber-200'
+            }`}>
+              📡 {networkName}
+            </span>
+            <ThemeToggle />
+            <span className="hidden sm:inline text-xs bg-primary/10 border border-primary/20 text-primary px-3 py-1 rounded-full font-semibold">
+              Security Clearances
+            </span>
+          </div>
+        </div>
+
+        {/* Tab view */}
+        <div className="px-6 sm:px-10 py-8 max-w-5xl">
+          {activeTab === 'approvals' && <ApprovalsTab account={guardian.address} />}
+          {activeTab === 'results' && <ResultsTab />}
+          {activeTab === 'orgs' && <OrgsTab />}
+          {activeTab === 'gas' && <GasTab />}
+          {activeTab === 'gov' && <GovTab />}
         </div>
       </main>
+
     </div>
   );
 }

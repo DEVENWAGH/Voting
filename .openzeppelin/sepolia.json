@@ -1,0 +1,386 @@
+{
+  "manifestVersion": "3.2",
+  "proxies": [
+    {
+      "address": "0x95E5E243Ac3Ef0d8e31f1Db8F9FF82044F4ccf73",
+      "txHash": "0x0ba45ef1bc5d38d70462ec517235749928c8f432fd576341530d69096fa15ee7",
+      "kind": "uups"
+    },
+    {
+      "address": "0x0B4e8a6EEaC79f36f79bf1Be2919327Ec9fa9324",
+      "txHash": "0xfd8a58dccc58a21a4cbc6df2b9afce82053b765a42e4417d90ca7df3c86f2eb6",
+      "kind": "uups"
+    },
+    {
+      "address": "0x78d5c21dE0eAffF41c503f103F05dBE5F5b99Eeb",
+      "txHash": "0xf35db43e255e57a00cf639b9dd1a73c6a7ec8665a83483c11c1073b2208e6567",
+      "kind": "uups"
+    },
+    {
+      "address": "0xb87A79cEaDd1d60d066617B55Ff35E10A9ffb79D",
+      "txHash": "0xfa7243339d0de7e9b22cd76c23435bc6eaa37d6bc28014768fbe173f3e086748",
+      "kind": "uups"
+    },
+    {
+      "address": "0x3463331f0EAD5f654B19E669FABB7965AFE7495C",
+      "txHash": "0x3490176ba343af24ee56b41c8f3179e73e582c539c0f9936b09492ce2a168a3d",
+      "kind": "uups"
+    },
+    {
+      "address": "0xE2a5EaFDFdB006FDa6c1a6Da76B76d2B4f946243",
+      "txHash": "0xecc958e00551bc636e7818faa3469c69613565fa2c5cf43b1403595382af1742",
+      "kind": "uups"
+    },
+    {
+      "address": "0x32F0BCa22824B8d1d4C691e06b5447134E3dC5A0",
+      "txHash": "0xff521f9004c4268ad025492b012a1a5d4294718cb1fb7c58019c7d8595dd8a13",
+      "kind": "uups"
+    },
+    {
+      "address": "0xB899b5455E81E510E06251F02b7E85e58eE6E529",
+      "txHash": "0x53e3e50d934b7e2aba9b17805fb05e4c26a9be47ffdd6b49c1452b6d498b476e",
+      "kind": "uups"
+    },
+    {
+      "address": "0xFA07b9D1E746f85f0ec6e6bD635310d83faBF6e0",
+      "txHash": "0x20286536a84f336ec59da681b571c424db36b9dcf9c366a43f4486c99658e117",
+      "kind": "uups"
+    }
+  ],
+  "impls": {
+    "5cd9d5a3bfbb31c6a7413cb60da675086e6babe2654e7a5ab1faf7b3cd0b4bff": {
+      "address": "0xbE4E2F3B0C78a787bcb813425426c6bc1D873D20",
+      "txHash": "0x78fadfcd5cafa4abb0b37a8a78711181f08a9a8c63bf628e2bb6b5356219cb12",
+      "layout": {
+        "solcVersion": "0.8.22",
+        "storage": [
+          {
+            "label": "relayWallet",
+            "offset": 0,
+            "slot": "0",
+            "type": "t_address",
+            "contract": "VotingV1",
+            "src": "contracts\\VotingV1.sol:64"
+          },
+          {
+            "label": "electionCount",
+            "offset": 0,
+            "slot": "1",
+            "type": "t_uint256",
+            "contract": "VotingV1",
+            "src": "contracts\\VotingV1.sol:65"
+          },
+          {
+            "label": "guardians",
+            "offset": 0,
+            "slot": "2",
+            "type": "t_array(t_address)3_storage",
+            "contract": "VotingV1",
+            "src": "contracts\\VotingV1.sol:66"
+          },
+          {
+            "label": "proposalCount",
+            "offset": 0,
+            "slot": "5",
+            "type": "t_uint256",
+            "contract": "VotingV1",
+            "src": "contracts\\VotingV1.sol:66"
+          },
+          {
+            "label": "elections",
+            "offset": 0,
+            "slot": "6",
+            "type": "t_mapping(t_uint256,t_struct(Election)2369_storage)",
+            "contract": "VotingV1",
+            "src": "contracts\\VotingV1.sol:68"
+          },
+          {
+            "label": "candidates",
+            "offset": 0,
+            "slot": "7",
+            "type": "t_mapping(t_uint256,t_mapping(t_uint256,t_struct(Candidate)2384_storage))",
+            "contract": "VotingV1",
+            "src": "contracts\\VotingV1.sol:70"
+          },
+          {
+            "label": "electionCandidateCount",
+            "offset": 0,
+            "slot": "8",
+            "type": "t_mapping(t_uint256,t_uint256)",
+            "contract": "VotingV1",
+            "src": "contracts\\VotingV1.sol:71"
+          },
+          {
+            "label": "hasVoted",
+            "offset": 0,
+            "slot": "9",
+            "type": "t_mapping(t_bytes32,t_mapping(t_uint256,t_bool))",
+            "contract": "VotingV1",
+            "src": "contracts\\VotingV1.sol:72"
+          },
+          {
+            "label": "isRegisteredVoter",
+            "offset": 0,
+            "slot": "10",
+            "type": "t_mapping(t_bytes32,t_bool)",
+            "contract": "VotingV1",
+            "src": "contracts\\VotingV1.sol:74"
+          },
+          {
+            "label": "upgradeProposals",
+            "offset": 0,
+            "slot": "11",
+            "type": "t_mapping(t_uint256,t_struct(UpgradeProposal)2395_storage)",
+            "contract": "VotingV1",
+            "src": "contracts\\VotingV1.sol:75"
+          }
+        ],
+        "types": {
+          "t_bool": {
+            "label": "bool",
+            "numberOfBytes": "1"
+          },
+          "t_struct(InitializableStorage)130_storage": {
+            "label": "struct Initializable.InitializableStorage",
+            "members": [
+              {
+                "label": "_initialized",
+                "type": "t_uint64",
+                "offset": 0,
+                "slot": "0"
+              },
+              {
+                "label": "_initializing",
+                "type": "t_bool",
+                "offset": 8,
+                "slot": "0"
+              }
+            ],
+            "numberOfBytes": "32"
+          },
+          "t_uint64": {
+            "label": "uint64",
+            "numberOfBytes": "8"
+          },
+          "t_address": {
+            "label": "address",
+            "numberOfBytes": "20"
+          },
+          "t_array(t_address)3_storage": {
+            "label": "address[3]",
+            "numberOfBytes": "96"
+          },
+          "t_bytes32": {
+            "label": "bytes32",
+            "numberOfBytes": "32"
+          },
+          "t_enum(ElectionPhase)2351": {
+            "label": "enum VotingV1.ElectionPhase",
+            "members": [
+              "Registration",
+              "Voting",
+              "Completed"
+            ],
+            "numberOfBytes": "1"
+          },
+          "t_mapping(t_address,t_bool)": {
+            "label": "mapping(address => bool)",
+            "numberOfBytes": "32"
+          },
+          "t_mapping(t_bytes32,t_bool)": {
+            "label": "mapping(bytes32 => bool)",
+            "numberOfBytes": "32"
+          },
+          "t_mapping(t_bytes32,t_mapping(t_uint256,t_bool))": {
+            "label": "mapping(bytes32 => mapping(uint256 => bool))",
+            "numberOfBytes": "32"
+          },
+          "t_mapping(t_uint256,t_bool)": {
+            "label": "mapping(uint256 => bool)",
+            "numberOfBytes": "32"
+          },
+          "t_mapping(t_uint256,t_mapping(t_uint256,t_struct(Candidate)2384_storage))": {
+            "label": "mapping(uint256 => mapping(uint256 => struct VotingV1.Candidate))",
+            "numberOfBytes": "32"
+          },
+          "t_mapping(t_uint256,t_struct(Candidate)2384_storage)": {
+            "label": "mapping(uint256 => struct VotingV1.Candidate)",
+            "numberOfBytes": "32"
+          },
+          "t_mapping(t_uint256,t_struct(Election)2369_storage)": {
+            "label": "mapping(uint256 => struct VotingV1.Election)",
+            "numberOfBytes": "32"
+          },
+          "t_mapping(t_uint256,t_struct(UpgradeProposal)2395_storage)": {
+            "label": "mapping(uint256 => struct VotingV1.UpgradeProposal)",
+            "numberOfBytes": "32"
+          },
+          "t_mapping(t_uint256,t_uint256)": {
+            "label": "mapping(uint256 => uint256)",
+            "numberOfBytes": "32"
+          },
+          "t_string_storage": {
+            "label": "string",
+            "numberOfBytes": "32"
+          },
+          "t_struct(Candidate)2384_storage": {
+            "label": "struct VotingV1.Candidate",
+            "members": [
+              {
+                "label": "id",
+                "type": "t_uint256",
+                "offset": 0,
+                "slot": "0"
+              },
+              {
+                "label": "name",
+                "type": "t_string_storage",
+                "offset": 0,
+                "slot": "1"
+              },
+              {
+                "label": "party",
+                "type": "t_string_storage",
+                "offset": 0,
+                "slot": "2"
+              },
+              {
+                "label": "symbol",
+                "type": "t_string_storage",
+                "offset": 0,
+                "slot": "3"
+              },
+              {
+                "label": "manifesto",
+                "type": "t_string_storage",
+                "offset": 0,
+                "slot": "4"
+              },
+              {
+                "label": "photoUrl",
+                "type": "t_string_storage",
+                "offset": 0,
+                "slot": "5"
+              },
+              {
+                "label": "voteCount",
+                "type": "t_uint256",
+                "offset": 0,
+                "slot": "6"
+              }
+            ],
+            "numberOfBytes": "224"
+          },
+          "t_struct(Election)2369_storage": {
+            "label": "struct VotingV1.Election",
+            "members": [
+              {
+                "label": "id",
+                "type": "t_uint256",
+                "offset": 0,
+                "slot": "0"
+              },
+              {
+                "label": "title",
+                "type": "t_string_storage",
+                "offset": 0,
+                "slot": "1"
+              },
+              {
+                "label": "description",
+                "type": "t_string_storage",
+                "offset": 0,
+                "slot": "2"
+              },
+              {
+                "label": "bannerUrl",
+                "type": "t_string_storage",
+                "offset": 0,
+                "slot": "3"
+              },
+              {
+                "label": "startTime",
+                "type": "t_uint256",
+                "offset": 0,
+                "slot": "4"
+              },
+              {
+                "label": "endTime",
+                "type": "t_uint256",
+                "offset": 0,
+                "slot": "5"
+              },
+              {
+                "label": "phase",
+                "type": "t_enum(ElectionPhase)2351",
+                "offset": 0,
+                "slot": "6"
+              },
+              {
+                "label": "exists",
+                "type": "t_bool",
+                "offset": 1,
+                "slot": "6"
+              }
+            ],
+            "numberOfBytes": "224"
+          },
+          "t_struct(UpgradeProposal)2395_storage": {
+            "label": "struct VotingV1.UpgradeProposal",
+            "members": [
+              {
+                "label": "newImplementation",
+                "type": "t_address",
+                "offset": 0,
+                "slot": "0"
+              },
+              {
+                "label": "approvalCount",
+                "type": "t_uint256",
+                "offset": 0,
+                "slot": "1"
+              },
+              {
+                "label": "executed",
+                "type": "t_bool",
+                "offset": 0,
+                "slot": "2"
+              },
+              {
+                "label": "approvedBy",
+                "type": "t_mapping(t_address,t_bool)",
+                "offset": 0,
+                "slot": "3"
+              }
+            ],
+            "numberOfBytes": "128"
+          },
+          "t_uint256": {
+            "label": "uint256",
+            "numberOfBytes": "32"
+          }
+        },
+        "namespaces": {
+          "erc7201:openzeppelin.storage.Initializable": [
+            {
+              "contract": "Initializable",
+              "label": "_initialized",
+              "type": "t_uint64",
+              "src": "@openzeppelin\\contracts\\proxy\\utils\\Initializable.sol:69",
+              "offset": 0,
+              "slot": "0"
+            },
+            {
+              "contract": "Initializable",
+              "label": "_initializing",
+              "type": "t_bool",
+              "src": "@openzeppelin\\contracts\\proxy\\utils\\Initializable.sol:73",
+              "offset": 8,
+              "slot": "0"
+            }
+          ]
+        }
+      }
+    }
+  }
+}

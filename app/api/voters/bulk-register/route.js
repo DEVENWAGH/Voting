@@ -6,10 +6,20 @@
  * GET  /api/voters/bulk-register?orgSlug=xxx&electionId=0  — check pending count
  */
 import { NextResponse } from 'next/server';
-import { ethers } from 'ethers';
 import connectDB from '@/lib/db';
 import Voter from '@/lib/models/Voter';
-import { relayRegisterVoter, resetRelayNonce } from '@/lib/relay';
+import { relayRegisterVoter, resetRelayNonce, isVoterRegisteredOnChain } from '@/lib/relay';
+import { computeNullifierHash, isAlreadyRegisteredError } from '@/lib/voterIdentity';
+
+async function linkExistingVoter(voter, nullifierHash) {
+  await Voter.findByIdAndUpdate(voter._id, {
+    status: 'registered',
+    nullifierHash,
+    registeredAt: new Date(),
+    onChainTxHash: 'linked-existing',
+    rejectionReason: '',
+  });
+}
 
 export async function POST(req) {
   try {
@@ -23,8 +33,17 @@ export async function POST(req) {
 
     await connectDB();
 
-    const pendingVoters = await Voter.find({ orgSlug, electionId: Number(electionId), status: 'pending' });
-    if (pendingVoters.length === 0) {
+    const eid = Number(electionId);
+    // Include voters previously rejected only because they were already on-chain from another election
+    const votersToRegister = await Voter.find({
+      orgSlug,
+      electionId: eid,
+      $or: [
+        { status: 'pending' },
+        { status: 'rejected', rejectionReason: /already registered|transaction execution reverted/i },
+      ],
+    });
+    if (votersToRegister.length === 0) {
       return NextResponse.json({ success: true, message: 'No pending voters to register', registered: 0 });
     }
 
@@ -32,24 +51,29 @@ export async function POST(req) {
     resetRelayNonce();
 
     let registered = 0;
+    let linked = 0;
     let failed = 0;
     const failedVoters = [];
 
-    for (const voter of pendingVoters) {
+    for (const voter of votersToRegister) {
       const label = voter.memberId || voter.email;
       let success = false;
+      const nullifierHash = computeNullifierHash(orgSlug, voter.email);
+
+      // Org-wide on-chain registration — skip tx if already registered from a prior election
+      try {
+        if (await isVoterRegisteredOnChain(nullifierHash)) {
+          await linkExistingVoter(voter, nullifierHash);
+          linked++;
+          continue;
+        }
+      } catch (checkErr) {
+        console.warn(`[bulk-register] on-chain check failed for ${label}:`, checkErr.message);
+      }
 
       // Retry up to 3 times to handle nonce desync with Hardhat automining
       for (let attempt = 0; attempt < 3 && !success; attempt++) {
         try {
-          // CANONICAL nullifier formula: orgSlug:email:secret
-          // Must match send-otp and verify-otp exactly
-          const secret = process.env.SERVER_IDENTITY_SECRET || 'dev-identity-secret-change-in-prod-12345';
-          const cleanEmail = voter.email.toLowerCase().trim();
-          const nullifierHash = ethers.keccak256(
-            ethers.toUtf8Bytes(`${orgSlug}:${cleanEmail}:${secret}`)
-          );
-
           const { txHash } = await relayRegisterVoter(nullifierHash);
 
           await Voter.findByIdAndUpdate(voter._id, {
@@ -57,16 +81,36 @@ export async function POST(req) {
             nullifierHash,
             registeredAt: new Date(),
             onChainTxHash: txHash,
+            rejectionReason: '',
           });
           registered++;
           success = true;
         } catch (err) {
           // If nonce error, reset and retry
-          if (err.code === 'NONCE_EXPIRED' || err.message?.includes('Nonce too low')) {
+          if (err.code === 'NONCE_EXPIRED' || err.message?.includes('Nonce too low') || err.message?.includes('nonce has already been used')) {
             console.warn(`[bulk-register] nonce error for ${label}, retrying (attempt ${attempt + 1})...`);
             resetRelayNonce();
             continue;
           }
+          // On-chain identity is org-wide — voter may already be registered from another election
+          if (isAlreadyRegisteredError(err)) {
+            await linkExistingVoter(voter, nullifierHash);
+            linked++;
+            success = true;
+            continue;
+          }
+          // Sepolia often omits revert reason — verify on-chain before marking failed
+          try {
+            if (await isVoterRegisteredOnChain(nullifierHash)) {
+              await linkExistingVoter(voter, nullifierHash);
+              linked++;
+              success = true;
+              continue;
+            }
+          } catch {
+            // fall through to rejected
+          }
+          resetRelayNonce();
           // Non-nonce error — mark rejected and move on
           console.error('[bulk-register] voter', label, err.message);
           await Voter.findByIdAndUpdate(voter._id, {
@@ -94,8 +138,12 @@ export async function POST(req) {
     return NextResponse.json({
       success: true,
       registered,
+      linked,
       failed,
       failedVoters,
+      message: linked > 0
+        ? `${registered} newly registered, ${linked} linked from prior org registration (no extra gas).`
+        : undefined,
     });
 
   } catch (err) {

@@ -200,6 +200,7 @@ export async function POST(req, { params }) {
       bannerUrl,
       start,
       end,
+      slug,
     );
 
     // Get the newly-created election ID from the contract

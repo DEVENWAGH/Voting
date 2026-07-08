@@ -7,13 +7,14 @@
  */
 import { NextResponse } from 'next/server';
 import connectDB from '@/lib/db';
+import mongoose from 'mongoose';
 import Voter from '@/lib/models/Voter';
 
 // Indexes that existed in old schema versions — must be removed
 const STALE_INDEXES = [
   'orgId_1_memberId_1',      // old unique compound — causes E11000 on memberId: ""
   'orgId_1_email_1',         // old unique compound replaced by orgSlug_1_email_1
-  'nullifierHash_1',         // may exist as non-sparse — will be recreated sparse
+  'nullifierHash_1',         // was globally unique — same voter can appear in multiple elections
   'memberId_1',              // old standalone index
 ];
 
@@ -45,11 +46,38 @@ export async function GET() {
       }
     }
 
-    // 3. Sync current schema indexes (creates any missing, leaves correct ones)
+    // 3. Drop legacy global unique nullifierHash (same voter can be in multiple elections)
+    if (existing.includes('nullifierHash_1')) {
+      try {
+        await collection.dropIndex('nullifierHash_1');
+        if (!dropped.includes('nullifierHash_1')) dropped.push('nullifierHash_1');
+      } catch (e) {
+        console.warn('[fix-indexes] Could not drop nullifierHash_1:', e.message);
+      }
+    }
+
+    // 4. Ensure per-election nullifier lookup index exists (non-unique)
+    await collection.createIndex(
+      { orgSlug: 1, electionId: 1, nullifierHash: 1 },
+      { name: 'orgSlug_1_electionId_1_nullifierHash_1', background: true },
+    );
+
+    // 5. Sync other schema indexes (may recreate stale ones if model cache is old — re-drop after)
+    delete mongoose.models.Voter;
     await Voter.syncIndexes();
+
+    // 6. Safety: never keep a global unique nullifierHash index
+    const afterSync = (await collection.indexes()).map(i => i.name);
+    if (afterSync.includes('nullifierHash_1')) {
+      const nh = (await collection.indexes()).find(i => i.name === 'nullifierHash_1');
+      if (nh?.unique) {
+        await collection.dropIndex('nullifierHash_1');
+        dropped.push('nullifierHash_1 (post-sync)');
+      }
+    }
     console.log('[fix-indexes] syncIndexes complete');
 
-    // 4. Report final index state
+    // 7. Report final index state
     const finalIndexes = (await collection.indexes()).map(i => ({
       name: i.name,
       key:  i.key,

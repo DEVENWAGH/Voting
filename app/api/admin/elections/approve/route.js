@@ -48,7 +48,7 @@ export async function POST(req) {
 
     // ACTION: approve
     // Transition on-chain: Registration(0) → Voting(1)
-    const { txHash } = await relayTransitionPhase(Number(electionId), 1);
+    const { txHash } = await relayTransitionPhase(Number(electionId), 1, electionDoc.orgSlug);
 
     // Update MongoDB
     await Election.findOneAndUpdate(

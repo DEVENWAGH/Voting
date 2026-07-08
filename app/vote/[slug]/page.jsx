@@ -1,31 +1,30 @@
-"use client";
+'use client';
 
-import { useState, useEffect, useCallback } from "react";
-import { useParams } from "next/navigation";
+import { useState, useEffect, useCallback } from 'react';
+import { useParams } from 'next/navigation';
+import Link from 'next/link';
+import { motion, AnimatePresence } from 'framer-motion';
 import {
-  Building2,
-  Mail,
-  Lock,
-  ShieldCheck,
-  CheckCircle2,
-  ChevronRight,
-  Vote,
-  AlertCircle,
-  Loader2,
-  RefreshCw,
-} from "lucide-react";
+  Building2, Mail, Lock, ShieldCheck, CheckCircle2, ChevronRight,
+  Vote, AlertCircle, Loader2, Trophy, BarChart3
+} from 'lucide-react';
+import ElectionResults from '@/components/ElectionResults';
+import ThemeToggle from '@/components/ThemeToggle';
 
 export default function VoterPortal() {
   const { slug } = useParams();
   const [org, setOrg] = useState(null);
   const [elections, setElections] = useState([]);
+  const [completedElections, setCompletedElections] = useState([]);
+  const [portalView, setPortalView] = useState('live'); // live | results
+  const [viewingResults, setViewingResults] = useState(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
 
   // Auth & flow state
-  const [email, setEmail] = useState("");
+  const [email, setEmail] = useState('');
   const [otpSent, setOtpSent] = useState(false);
-  const [otp, setOtp] = useState("");
+  const [otp, setOtp] = useState('');
   const [verifying, setVerifying] = useState(false);
 
   // Voting state
@@ -39,23 +38,20 @@ export default function VoterPortal() {
   const loadData = useCallback(async () => {
     setLoading(true);
     try {
-      // Get Org info
       const orgRes = await fetch(`/api/orgs/register?slug=${slug}`);
       const orgData = await orgRes.json();
-      if (!orgRes.ok)
-        throw new Error(orgData.error || "Organization not found");
+      if (!orgRes.ok) throw new Error(orgData.error || 'Organization not found');
       setOrg(orgData.org);
 
-      // Get Elections scoped to this org
       const elRes = await fetch(`/api/org/${slug}/elections`);
       const elData = await elRes.json();
       if (!elRes.ok) throw new Error(elData.error);
 
-      // Filter for live elections (Phase 1 = Voting) AND guardian approved
-      const live = (elData.elections || []).filter(
-        (e) => e.phase === 1 && e.guardianApproved,
-      );
+      const all = elData.elections || [];
+      const live = all.filter((e) => e.phase === 1 && e.guardianApproved);
+      const completed = all.filter((e) => e.phase === 2);
       setElections(live);
+      setCompletedElections(completed);
     } catch (e) {
       setError(e.message);
     }
@@ -82,9 +78,9 @@ export default function VoterPortal() {
     setVerifying(true);
     setError(null);
     try {
-      const res = await fetch("/api/auth/send-otp", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
+      const res = await fetch('/api/auth/send-otp', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           email,
           orgId: org._id,
@@ -103,18 +99,17 @@ export default function VoterPortal() {
   // 4. Verify OTP & Cast Vote
   const castVote = async (e) => {
     e.preventDefault();
-    // Fix: selectedCandidate can be 0 (first candidate), so check for null explicitly
     if (selectedCandidate === null || selectedCandidate === undefined) {
-      setError("Please select a candidate first");
+      setError('Please select a candidate first.');
       return;
     }
 
     setVerifying(true);
     setError(null);
     try {
-      const res = await fetch("/api/auth/verify-otp", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
+      const res = await fetch('/api/auth/verify-otp', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           email,
           otp,
@@ -134,108 +129,185 @@ export default function VoterPortal() {
     setVerifying(false);
   };
 
-  if (loading)
+  if (loading) {
     return (
-      <div className="min-h-screen bg-[#020617] flex justify-center items-center">
-        <Loader2 size={36} className="animate-spin text-indigo-500" />
+      <div className="min-h-screen bg-canvas flex justify-center items-center">
+        <Loader2 size={32} className="animate-spin text-primary" />
       </div>
     );
+  }
 
-  if (error && !org)
+  if (error && !org) {
     return (
-      <div className="min-h-screen bg-[#020617] flex justify-center items-center p-6 text-center">
-        <div>
-          <Building2 size={48} className="text-slate-800 mx-auto mb-4" />
-          <h1 className="text-white text-xl font-bold mb-2">
-            Portal Not Found
-          </h1>
-          <p className="text-slate-400">{error}</p>
+      <div className="min-h-screen bg-surface-soft flex justify-center items-center p-6 text-center">
+        <div className="bg-canvas p-8 border border-hairline rounded-xl max-w-sm shadow-sm">
+          <Building2 size={40} className="text-muted mx-auto mb-4" />
+          <h1 className="text-ink text-lg font-semibold mb-2">Portal Not Found</h1>
+          <p className="text-body text-sm">{error}</p>
         </div>
       </div>
     );
+  }
 
   return (
-    <div className="min-h-screen bg-[#020617] text-white relative flex flex-col">
+    <div className="min-h-screen bg-canvas text-ink flex flex-col font-sans">
+      
       {/* Top Navbar */}
-      <nav className="border-b border-white/5 bg-slate-950/80 px-6 py-4 flex items-center justify-between">
+      <nav className="border-b border-hairline bg-canvas/80 backdrop-blur-md sticky top-0 z-10 px-6 py-4 flex items-center justify-between">
         <div className="flex items-center gap-3">
-          <div className="w-10 h-10 rounded-xl bg-indigo-950 border border-indigo-500/20 flex items-center justify-center">
+          <div className="w-10 h-10 rounded-full bg-surface-strong flex items-center justify-center border border-hairline">
             {org.logoUrl ? (
-              <img
-                src={org.logoUrl}
-                alt={org.name}
-                className="w-6 h-6 object-contain"
-              />
+              <img src={org.logoUrl} alt={org.name} className="w-6 h-6 object-contain" />
             ) : (
-              <Building2 size={20} className="text-indigo-400" />
+              <Building2 size={18} className="text-primary" />
             )}
           </div>
           <div>
-            <h1 className="font-bold text-lg leading-tight">{org.name}</h1>
-            <p className="text-xs text-slate-500 uppercase tracking-wider font-semibold">
-              Voter Portal
-            </p>
+            <h1 className="font-bold text-ink text-base leading-tight">{org.name}</h1>
+            <p className="text-xs text-muted font-semibold uppercase tracking-wider">Voter Portal</p>
           </div>
         </div>
-        <div className="flex items-center gap-2 text-xs text-slate-400 bg-slate-900 border border-slate-800 px-3 py-1.5 rounded-full font-medium">
-          <ShieldCheck size={14} className="text-green-500" /> Secured by Aegis
+        <div className="flex items-center gap-3">
+          <ThemeToggle />
+          <Link href="/verify" className="text-xs text-primary hover:text-primary-active font-semibold transition">
+            Verify Ballots
+          </Link>
+          <div className="flex items-center gap-2 text-xs text-body bg-surface-soft border border-hairline px-3 py-1.5 rounded-full font-medium">
+            <ShieldCheck size={14} className="text-primary shrink-0" />
+            <span>Secured Session</span>
+          </div>
         </div>
       </nav>
 
-      {/* Main Content */}
-      <main className="flex-1 flex flex-col items-center justify-center p-6 pb-20">
+      {/* Main Container */}
+      <main className="flex-1 flex flex-col items-center justify-center p-6 pb-24 bg-surface-soft/40">
         <div className="w-full max-w-xl">
-          {/* STEP 1: Select Election */}
-          {!selectedElection && (
-            <div className="space-y-4 animate-in fade-in slide-in-from-bottom-4">
-              <h2 className="text-2xl font-black mb-6 text-center">
-                Live Elections
-              </h2>
+          
+          {/* Portal Tabs */}
+          {!selectedElection && !viewingResults && (
+            <div className="flex p-1 bg-surface-strong border border-hairline rounded-full mb-8">
+              <button
+                onClick={() => setPortalView('live')}
+                className={`flex-1 flex items-center justify-center gap-2 py-2.5 rounded-full text-xs font-semibold tracking-wider uppercase transition-all cursor-pointer ${
+                  portalView === 'live'
+                    ? 'bg-canvas text-primary shadow-sm border border-hairline/60'
+                    : 'text-body hover:text-ink'
+                }`}
+              >
+                <Vote size={14} /> 
+                <span>Active Ballots</span>
+                {elections.length > 0 && (
+                  <span className="text-xs font-mono bg-primary/10 text-primary px-2 py-0.5 rounded-full ml-1">{elections.length}</span>
+                )}
+              </button>
+              <button
+                onClick={() => setPortalView('results')}
+                className={`flex-1 flex items-center justify-center gap-2 py-2.5 rounded-full text-xs font-semibold tracking-wider uppercase transition-all cursor-pointer ${
+                  portalView === 'results'
+                    ? 'bg-canvas text-primary shadow-sm border border-hairline/60'
+                    : 'text-body hover:text-ink'
+                }`}
+              >
+                <BarChart3 size={14} /> 
+                <span>Results</span>
+                {completedElections.length > 0 && (
+                  <span className="text-xs font-mono bg-primary/10 text-primary px-2 py-0.5 rounded-full ml-1">{completedElections.length}</span>
+                )}
+              </button>
+            </div>
+          )}
+
+          {/* Results Details */}
+          {viewingResults && !selectedElection && (
+            <div className="space-y-6">
+              <div className="flex items-center justify-between">
+                <h2 className="text-xl font-display font-normal text-ink">Elections Results</h2>
+                <button
+                  onClick={() => setViewingResults(null)}
+                  className="text-xs bg-canvas hover:bg-surface-soft border border-hairline text-ink px-4 py-2 rounded-full font-medium transition cursor-pointer shadow-sm"
+                >
+                  Close Results
+                </button>
+              </div>
+              <div className="bg-canvas border border-hairline rounded-xl p-6 shadow-sm">
+                <ElectionResults slug={slug} electionId={viewingResults.id} electionTitle={viewingResults.title} />
+              </div>
+            </div>
+          )}
+
+          {/* Tab 1: Live elections */}
+          {!selectedElection && !viewingResults && portalView === 'live' && (
+            <div className="space-y-4">
+              <h2 className="text-center text-2xl font-display font-normal text-ink tracking-tight mb-6">Active Elections</h2>
               {elections.length === 0 ? (
-                <div className="text-center py-16 border border-slate-800 border-dashed rounded-2xl bg-slate-900/30">
-                  <Vote size={48} className="text-slate-700 mx-auto mb-4" />
-                  <p className="text-slate-400 font-semibold">
-                    No active elections
-                  </p>
-                  <p className="text-slate-500 text-sm mt-1">
-                    Check back later when an election is live.
-                  </p>
+                <div className="text-center py-16 border border-dashed border-hairline rounded-xl bg-canvas shadow-sm">
+                  <Vote size={36} className="text-muted mx-auto mb-4" />
+                  <p className="text-ink font-semibold">No active ballots</p>
+                  <p className="text-body text-sm mt-1">There are no open elections available to vote on at this time.</p>
                 </div>
               ) : (
                 elections.map((e) => (
                   <button
                     key={e.id}
                     onClick={() => selectElection(e)}
-                    className="w-full bg-slate-900/60 border border-slate-800 hover:border-indigo-500/50 rounded-2xl p-6 text-left transition group"
+                    className="w-full bg-canvas border border-hairline hover:border-primary rounded-xl p-6 text-left transition-all group shadow-sm flex items-center justify-between cursor-pointer"
                   >
-                    <div className="flex items-center justify-between">
-                      <div>
-                        <h3 className="text-xl font-bold text-white group-hover:text-indigo-300 transition">
-                          {e.title}
-                        </h3>
-                        <p className="text-sm text-slate-400 mt-1">
-                          {e.description}
-                        </p>
-                      </div>
-                      <ChevronRight className="text-slate-600 group-hover:text-indigo-400 transition" />
+                    <div className="min-w-0 pr-4">
+                      <h3 className="text-lg font-semibold text-ink group-hover:text-primary transition">
+                        {e.title}
+                      </h3>
+                      <p className="text-sm text-body mt-1 line-clamp-2">
+                        {e.description}
+                      </p>
                     </div>
+                    <ChevronRight className="text-muted group-hover:text-primary transition shrink-0" />
                   </button>
                 ))
               )}
             </div>
           )}
 
-          {/* STEP 2: Voting Flow */}
+          {/* Results list */}
+          {!selectedElection && !viewingResults && portalView === 'results' && (
+            <div className="space-y-4">
+              <h2 className="text-center text-2xl font-display font-normal text-ink tracking-tight mb-6">Completed Ballots</h2>
+              {completedElections.length === 0 ? (
+                <div className="text-center py-16 border border-dashed border-hairline rounded-xl bg-canvas shadow-sm">
+                  <Trophy size={36} className="text-muted mx-auto mb-4" />
+                  <p className="text-ink font-semibold">No results published</p>
+                  <p className="text-body text-sm mt-1">Outcome data will appear once the active voting phase has concluded.</p>
+                </div>
+              ) : (
+                completedElections.map((e) => (
+                  <button
+                    key={e.id}
+                    onClick={() => setViewingResults(e)}
+                    className="w-full bg-canvas border border-hairline hover:border-primary rounded-xl p-6 text-left transition-all group shadow-sm flex items-center justify-between cursor-pointer"
+                  >
+                    <div className="min-w-0 pr-4">
+                      <span className="text-[10px] font-semibold bg-surface-strong px-2 py-0.5 rounded-full text-muted uppercase tracking-wider">
+                        Archive
+                      </span>
+                      <h3 className="text-lg font-semibold text-ink group-hover:text-primary transition mt-2">
+                        {e.title}
+                      </h3>
+                      <p className="text-sm text-body mt-1 line-clamp-2">{e.description}</p>
+                    </div>
+                    <ChevronRight className="text-muted group-hover:text-primary transition shrink-0" />
+                  </button>
+                ))
+              )}
+            </div>
+          )}
+
+          {/* Ballot Submission Form */}
           {selectedElection && !voteSuccess && (
-            <div className="bg-slate-900/40 border border-slate-800 rounded-3xl overflow-hidden backdrop-blur-xl animate-in zoom-in-95">
-              <div className="bg-slate-950/80 border-b border-slate-800 p-6 flex flex-col sm:flex-row items-center justify-between gap-4">
+            <div className="bg-canvas border border-hairline rounded-xl overflow-hidden shadow-sm">
+              
+              <div className="bg-surface-soft border-b border-hairline p-6 flex flex-col sm:flex-row sm:items-center justify-between gap-4">
                 <div>
-                  <p className="text-xs text-indigo-400 font-bold uppercase tracking-wider mb-1">
-                    Casting Ballot
-                  </p>
-                  <h2 className="text-xl font-bold">
-                    {selectedElection.title}
-                  </h2>
+                  <span className="text-[10px] font-semibold text-primary uppercase tracking-widest block mb-1">BALLOT ENVELOPE</span>
+                  <h2 className="text-lg font-semibold text-ink leading-tight">{selectedElection.title}</h2>
                 </div>
                 <button
                   onClick={() => {
@@ -243,50 +315,48 @@ export default function VoterPortal() {
                     setOtpSent(false);
                     setCandidates([]);
                   }}
-                  className="text-xs text-slate-500 hover:text-white border border-slate-700 hover:border-slate-500 px-3 py-1.5 rounded-lg transition shrink-0"
+                  className="text-xs bg-canvas hover:bg-surface-soft border border-hairline text-ink px-4 py-2 rounded-full font-medium transition cursor-pointer"
                 >
-                  Change Election
+                  Change Ballot
                 </button>
               </div>
 
-              <div className="p-6 sm:p-8 space-y-8">
-                {/* Error Banner */}
+              <div className="p-6 md:p-8 space-y-8">
                 {error && (
-                  <div className="bg-red-950/60 border border-red-800 text-red-300 rounded-xl p-4 flex items-start gap-3 text-sm">
-                    <AlertCircle size={18} className="shrink-0 mt-0.5" />
-                    <p>{error}</p>
+                  <div className="bg-canvas border border-semantic-down text-semantic-down rounded-xl p-4 flex items-start gap-3 text-sm">
+                    <AlertCircle size={16} className="shrink-0 mt-0.5" />
+                    <span>{error}</span>
                   </div>
                 )}
 
-                {/* Select Candidate */}
+                {/* Candidate Selector */}
                 <div className="space-y-4">
-                  <h3 className="font-bold flex items-center gap-2">
-                    <span className="w-6 h-6 rounded-full bg-indigo-950 text-indigo-400 flex items-center justify-center text-xs border border-indigo-500/20">
+                  <h3 className="font-semibold text-ink flex items-center gap-2.5 text-sm">
+                    <span className="w-5.5 h-5.5 rounded-full bg-primary/10 text-primary flex items-center justify-center text-xs font-bold font-mono">
                       1
-                    </span>{" "}
-                    Select your candidate
+                    </span>
+                    Select Candidate
                   </h3>
+                  
                   <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
                     {candidates.map((c) => (
                       <button
                         key={c.id}
                         onClick={() => setSelectedCandidate(c.id)}
-                        className={`p-4 rounded-2xl border text-left transition ${
+                        className={`p-4 rounded-xl border text-left transition-all cursor-pointer ${
                           selectedCandidate === c.id
-                            ? "bg-indigo-950/40 border-indigo-500 ring-2 ring-indigo-500/20"
-                            : "bg-slate-950/50 border-slate-800 hover:border-slate-600"
+                            ? 'bg-primary/5 border-primary shadow-sm'
+                            : 'bg-canvas border-hairline hover:border-body'
                         }`}
                       >
-                        <div className="text-2xl mb-2">{c.symbol || "🗳️"}</div>
-                        <p className="font-bold text-white text-base truncate">
-                          {c.name}
-                        </p>
-                        <p className="text-xs text-slate-400 font-semibold truncate">
-                          {c.party}
-                        </p>
+                        <span className="text-3xl block mb-2">{c.symbol || '🗳️'}</span>
+                        <p className="font-bold text-ink text-base truncate">{c.name}</p>
+                        <p className="text-xs text-body font-semibold truncate mt-0.5">{c.party}</p>
+                        
                         {selectedCandidate === c.id && (
-                          <div className="mt-3 flex items-center gap-1.5 text-indigo-400 text-xs font-bold bg-indigo-950/50 w-fit px-2 py-1 rounded-md">
-                            <CheckCircle2 size={12} /> Selected
+                          <div className="mt-3 flex items-center gap-1 text-primary text-xs font-bold bg-primary/10 w-fit px-2.5 py-0.5 rounded-full">
+                            <CheckCircle2 size={11} /> 
+                            <span>Selected</span>
                           </div>
                         )}
                       </button>
@@ -294,125 +364,120 @@ export default function VoterPortal() {
                   </div>
                 </div>
 
-                {/* Identity Verification */}
-                <div
-                  className={`space-y-4 transition duration-500 ${selectedCandidate !== null ? "opacity-100" : "opacity-40 pointer-events-none"}`}
-                >
-                  <h3 className="font-bold flex items-center gap-2">
-                    <span className="w-6 h-6 rounded-full bg-indigo-950 text-indigo-400 flex items-center justify-center text-xs border border-indigo-500/20">
+                {/* Identity verification */}
+                <div className={`space-y-4 transition duration-300 ${selectedCandidate !== null ? 'opacity-100' : 'opacity-30 pointer-events-none'}`}>
+                  <h3 className="font-semibold text-ink flex items-center gap-2.5 text-sm">
+                    <span className="w-5.5 h-5.5 rounded-full bg-primary/10 text-primary flex items-center justify-center text-xs font-bold font-mono">
                       2
-                    </span>{" "}
-                    Verify your identity
+                    </span>
+                    Verify Identity
                   </h3>
 
                   {!otpSent ? (
                     <form onSubmit={requestOtp} className="flex gap-3">
                       <div className="relative flex-1">
-                        <Mail
-                          className="absolute left-4 top-1/2 -translate-y-1/2 text-slate-500"
-                          size={18}
-                        />
+                        <Mail className="absolute left-4 top-1/2 -translate-y-1/2 text-muted" size={16} />
                         <input
                           type="email"
                           required
-                          placeholder="Enter your registered email"
+                          placeholder="registered@email.com"
                           value={email}
                           onChange={(e) => setEmail(e.target.value)}
-                          className="w-full bg-slate-950 border border-slate-700 focus:border-indigo-500 text-white pl-11 pr-4 py-3 rounded-xl outline-none transition text-sm"
+                          className="w-full bg-canvas border border-hairline focus:border-primary text-ink pl-11 pr-4 py-3 rounded-lg outline-none transition text-sm placeholder:text-muted"
                         />
                       </div>
                       <button
                         type="submit"
                         disabled={verifying || !email}
-                        className="bg-slate-100 hover:bg-white text-slate-900 px-6 rounded-xl font-bold text-sm transition disabled:opacity-50 whitespace-nowrap"
+                        className="bg-primary hover:bg-primary-active text-white px-6 rounded-full font-semibold text-sm transition-all disabled:opacity-50 whitespace-nowrap cursor-pointer shadow-sm"
                       >
-                        {verifying ? (
-                          <Loader2 size={16} className="animate-spin" />
-                        ) : (
-                          "Send OTP"
-                        )}
+                        {verifying ? <Loader2 size={14} className="animate-spin" /> : 'Send OTP'}
                       </button>
                     </form>
                   ) : (
                     <form onSubmit={castVote} className="space-y-4">
-                      <div className="bg-green-950/30 border border-green-800/50 rounded-xl p-4 text-sm text-green-400 flex items-center gap-2">
-                        <CheckCircle2 size={16} /> OTP sent to {email}
+                      <div className="bg-green-50 border border-green-200 rounded-lg p-3.5 text-xs text-green-700 font-semibold flex items-center gap-2">
+                        <CheckCircle2 size={14} /> 
+                        <span>Verification code dispatched to {email}</span>
                       </div>
+                      
                       <div className="flex gap-3">
                         <div className="relative flex-1">
-                          <Lock
-                            className="absolute left-4 top-1/2 -translate-y-1/2 text-slate-500"
-                            size={18}
-                          />
+                          <Lock className="absolute left-4 top-1/2 -translate-y-1/2 text-muted" size={16} />
                           <input
                             type="text"
                             required
-                            placeholder="Enter 6-digit OTP"
+                            placeholder="123456"
                             maxLength={6}
                             value={otp}
                             onChange={(e) => setOtp(e.target.value)}
-                            className="w-full bg-slate-950 border border-slate-700 focus:border-indigo-500 text-white pl-11 pr-4 py-3 rounded-xl outline-none transition font-mono tracking-widest text-lg"
+                            className="w-full bg-canvas border border-hairline focus:border-primary text-ink pl-11 pr-4 py-3 rounded-lg outline-none transition font-mono tracking-widest text-lg"
                           />
                         </div>
                         <button
                           type="submit"
                           disabled={verifying || otp.length < 6}
-                          className="flex items-center gap-2 bg-gradient-to-r from-indigo-500 to-violet-600 hover:from-indigo-600 hover:to-violet-700 text-white px-8 rounded-xl font-bold transition shadow-lg shadow-indigo-900/50 disabled:opacity-50 whitespace-nowrap"
+                          className="flex items-center gap-2 bg-primary hover:bg-primary-active text-white px-6 rounded-full font-semibold text-sm transition-all shadow-sm disabled:opacity-50 whitespace-nowrap cursor-pointer"
                         >
                           {verifying ? (
-                            <>
-                              <Loader2 size={16} className="animate-spin" />{" "}
-                              Verifying…
-                            </>
+                            <><Loader2 size={14} className="animate-spin" /> Transacting...</>
                           ) : (
-                            <>
-                              <Vote size={18} /> Cast Vote
-                            </>
+                            <><Vote size={14} /> Submit Vote</>
                           )}
                         </button>
                       </div>
                     </form>
                   )}
                 </div>
+
               </div>
             </div>
           )}
 
-          {/* STEP 3: Success */}
+          {/* Success screen */}
           {voteSuccess && (
-            <div className="bg-slate-900/60 border border-green-800 rounded-3xl p-10 text-center animate-in zoom-in">
-              <div className="w-20 h-20 bg-green-500/20 border border-green-500/30 rounded-full flex items-center justify-center mx-auto mb-6">
-                <CheckCircle2 size={40} className="text-green-400" />
+            <motion.div 
+              initial={{ scale: 0.95, opacity: 0 }}
+              animate={{ scale: 1, opacity: 1 }}
+              className="bg-canvas border border-hairline rounded-xl p-8 md:p-10 text-center shadow-sm"
+            >
+              <div className="w-16 h-16 bg-green-50 border border-green-200 rounded-full flex items-center justify-center mx-auto mb-6 text-green-600">
+                <CheckCircle2 size={32} />
               </div>
-              <h2 className="text-3xl font-black text-white mb-3">
-                Vote Cast Successfully
-              </h2>
-              <p className="text-slate-400 mb-8 max-w-md mx-auto">
-                Your vote for{" "}
-                <strong className="text-white">
-                  {candidates.find((c) => c.id === selectedCandidate)?.name}
-                </strong>{" "}
-                has been cryptographically secured on the blockchain.
+              <h2 className="text-2xl font-display font-normal text-ink mb-3">Vote Securing on Blockchain</h2>
+              
+              <p className="text-body text-sm mb-6 max-w-sm mx-auto leading-relaxed">
+                Your ballot for <strong className="text-ink font-semibold">{candidates.find((c) => c.id === selectedCandidate)?.name}</strong> has been received by relayer node. Cryptographic validation receipt has been forwarded.
               </p>
-              <div className="bg-slate-950 border border-slate-800 rounded-xl p-4 inline-block text-left mb-8">
-                <p className="text-xs text-slate-500 uppercase font-semibold mb-1">
-                  Transaction Hash (Receipt)
-                </p>
-                <code className="text-green-400 font-mono text-sm break-all">
+
+              <div className="bg-surface-soft border border-hairline rounded-lg p-4 inline-block text-left mb-8 max-w-full">
+                <p className="text-[10px] font-semibold text-muted uppercase tracking-wider mb-1">Cryptographic Receipt Hash</p>
+                <code className="text-green-700 font-mono text-xs break-all selection:bg-green-150">
                   {txHash}
                 </code>
               </div>
-              <br />
-              <button
-                onClick={() => window.location.reload()}
-                className="text-sm font-bold text-slate-400 hover:text-white transition underline underline-offset-4"
-              >
-                Return Home
-              </button>
-            </div>
+
+              <div className="flex flex-col gap-3">
+                <Link
+                  href={`/verify?txHash=${encodeURIComponent(txHash || '')}`}
+                  className="inline-flex items-center justify-center gap-1.5 text-sm font-semibold text-primary hover:underline"
+                >
+                  <ShieldCheck size={15} /> 
+                  <span>Validate receipt on-chain</span>
+                </Link>
+                <button
+                  onClick={() => window.location.reload()}
+                  className="text-xs font-semibold text-muted hover:text-ink transition cursor-pointer"
+                >
+                  Back to Portal
+                </button>
+              </div>
+            </motion.div>
           )}
+
         </div>
       </main>
+
     </div>
   );
 }

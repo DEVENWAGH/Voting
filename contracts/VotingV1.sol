@@ -361,5 +361,5 @@ contract VotingV1 is Initializable, UUPSUpgradeable {
     }
 
     /// @dev Required by UUPSUpgradeable
-    function version() external pure returns (string memory) { return "1.0.0"; }
+    function version() external pure virtual returns (string memory) { return "1.0.0"; }
 }

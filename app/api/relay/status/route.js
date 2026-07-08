@@ -11,7 +11,7 @@ export async function GET() {
       getRelayAddress(),
       getRelayBalance(),
     ]);
-    return NextResponse.json({ address, balanceETH: balance });
+    return NextResponse.json({ address, balance, balanceETH: balance });
   } catch (err) {
     console.error('[relay/status]', err);
     return NextResponse.json({ error: 'Could not reach blockchain node' }, { status: 503 });

@@ -14,6 +14,7 @@ import Voter from "@/lib/models/Voter";
 import EmailOTP from "@/lib/models/EmailOTP";
 import { preflightCheck } from "@/lib/preflightCache";
 import { relayCastVote } from "@/lib/relay";
+import { sendVoteReceiptEmail } from "@/lib/mailer";
 import bcrypt from "bcryptjs";
 
 export async function POST(req) {
@@ -148,6 +149,34 @@ export async function POST(req) {
       nullifierHash,
     );
 
+    const Candidate = (await import("@/lib/models/Candidate")).default;
+    const Election = (await import("@/lib/models/Election")).default;
+    const [candidate, election] = await Promise.all([
+      Candidate.findOne({
+        electionId: Number(electionId),
+        candidateId: Number(candidateId),
+      }).lean(),
+      Election.findOne({ electionId: Number(electionId) }).lean(),
+    ]);
+
+    const baseUrl =
+      process.env.NEXT_PUBLIC_APP_URL ||
+      process.env.APP_URL ||
+      "http://localhost:3000";
+    const verifyUrl = `${baseUrl}/verify?txHash=${encodeURIComponent(txHash)}`;
+
+    try {
+      await sendVoteReceiptEmail(cleanEmail, {
+        orgName: org.name || "Block Vote",
+        electionTitle: election?.title || `Election #${electionId}`,
+        candidateName: candidate?.name || "your selected candidate",
+        txHash,
+        verifyUrl,
+      });
+    } catch (mailErr) {
+      console.error("[verify-otp] receipt email failed:", mailErr);
+    }
+
     // ── 5. Mark OTP as used ───────────────────────────────────────────────────
     record.used = true;
     await record.save();
@@ -156,6 +185,7 @@ export async function POST(req) {
       success: true,
       message: "Vote successfully relayed and recorded on the blockchain.",
       txHash,
+      verifyUrl,
     });
   } catch (err) {
     console.error("[verify-otp]", err);

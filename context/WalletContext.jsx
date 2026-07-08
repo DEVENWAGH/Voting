@@ -39,6 +39,7 @@ export function WalletProvider({ children }) {
     try {
       const c = new ethers.Contract(CONTRACT_ADDRESS, contractABI.abi, signerOrProvider);
       setContract(c);
+      setReadContract(c); // Sync read-only contract with active MetaMask provider
       try {
         const admin = await c.electionCommission();
         setIsAdmin(admin.toLowerCase() === address.toLowerCase());
@@ -59,6 +60,16 @@ export function WalletProvider({ children }) {
     setContract(null);
     setIsAdmin(false);
     localStorage.removeItem('connectedAccount');
+
+    // Restore readContract back to the default RPC provider
+    const rpcUrl = process.env.NEXT_PUBLIC_RPC_URL || 'http://127.0.0.1:8545';
+    try {
+      const rpcProvider = new ethers.JsonRpcProvider(rpcUrl);
+      const rc = new ethers.Contract(CONTRACT_ADDRESS, contractABI.abi, rpcProvider);
+      setReadContract(rc);
+    } catch (err) {
+      console.warn('Read contract reset failed:', err.message);
+    }
   }, []);
 
   // Auto-reconnect on page load if previously connected

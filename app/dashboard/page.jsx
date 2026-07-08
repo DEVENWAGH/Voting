@@ -1,30 +1,33 @@
 'use client';
 
-import { useState, useEffect, useCallback } from 'react';
+import { useState, useEffect } from 'react';
 import { useSession, signOut } from 'next-auth/react';
 import { useRouter } from 'next/navigation';
 import { useDropzone } from 'react-dropzone';
+import { motion, AnimatePresence } from 'framer-motion';
+import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import {
-  LayoutDashboard, Users, LogOut, PlusCircle,
-  Upload, Download, RefreshCw, FileSpreadsheet, CheckCircle,
-  AlertCircle, Loader2, Building2, ChevronRight, BarChart3, Vote,
-  ArrowLeft, ChevronDown, UserPlus, Play, StopCircle, Shield,
-  Clock, CheckCircle2, XCircle
+  Users, LogOut, PlusCircle, Upload, Download, RefreshCw,
+  FileSpreadsheet, CheckCircle, AlertCircle, Loader2, Building2,
+  ChevronRight, BarChart3, ChevronDown, UserPlus, Play, StopCircle,
+  Shield, Clock, CheckCircle2, Trophy, ImagePlus, X, Vote
 } from 'lucide-react';
+import ElectionResults from '@/components/ElectionResults';
+import ThemeToggle from '@/components/ThemeToggle';
 
 const PHASE = ['Registration', 'Voting', 'Completed'];
 const PHASE_COLORS = [
-  'bg-blue-950/50 text-blue-300 border-blue-800',
-  'bg-green-950/50 text-green-300 border-green-800',
-  'bg-slate-950/50 text-slate-400 border-slate-700',
+  'bg-blue-50 text-blue-600 border-blue-200',
+  'bg-emerald-50 text-emerald-600 border-emerald-200',
+  'bg-surface-strong text-muted border-hairline',
 ];
 
-// ── Shared UI ─────────────────────────────────────────────────────────────────
+// ── Shared UI Components ──────────────────────────────────────────────────────
 function FieldInput({ label, value, onChange, placeholder = '', type = 'text', multiline = false }) {
-  const base = "w-full bg-slate-950/80 border border-slate-800 focus:border-indigo-500 text-white px-4 py-2.5 rounded-xl outline-none transition text-sm placeholder:text-slate-600";
+  const base = "w-full bg-canvas border border-hairline focus:border-primary text-ink px-4 py-2.5 rounded-lg outline-none transition text-sm placeholder:text-muted";
   return (
-    <div>
-      <label className="block text-xs font-semibold text-slate-500 mb-1.5 uppercase tracking-wider">{label}</label>
+    <div className="space-y-1.5">
+      <label className="block text-xs font-semibold text-body uppercase tracking-wider">{label}</label>
       {multiline
         ? <textarea value={value} onChange={onChange} placeholder={placeholder} rows={3} className={`${base} resize-none`} />
         : <input type={type} value={value} onChange={onChange} placeholder={placeholder} className={base} />
@@ -34,119 +37,208 @@ function FieldInput({ label, value, onChange, placeholder = '', type = 'text', m
 }
 
 function Toast({ type, msg }) {
-  const s = type === 'error'
-    ? 'bg-red-950/60 border-red-700 text-red-300'
-    : 'bg-green-950/60 border-green-700 text-green-300';
-  const Icon = type === 'error' ? AlertCircle : CheckCircle;
+  const isErr = type === 'error';
+  const bg = isErr ? 'bg-red-50 border-red-200 text-red-700' : 'bg-green-50 border-green-200 text-green-700';
+  const Icon = isErr ? AlertCircle : CheckCircle;
   return (
-    <div className={`flex gap-2.5 items-start border rounded-xl p-3 mt-4 text-sm ${s}`}>
-      <Icon size={15} className="shrink-0 mt-0.5" /> {msg}
-    </div>
+    <motion.div 
+      initial={{ opacity: 0, y: -10 }}
+      animate={{ opacity: 1, y: 0 }}
+      className={`flex gap-2.5 items-start border rounded-lg p-3 text-sm ${bg}`}
+    >
+      <Icon size={16} className="shrink-0 mt-0.5" />
+      <span>{msg}</span>
+    </motion.div>
   );
 }
 
 // ── Candidate Management Panel ────────────────────────────────────────────────
 function CandidatePanel({ slug, electionId }) {
-  const [candidates, setCandidates] = useState([]);
-  const [loading, setLoading] = useState(true);
-  const [form, setForm] = useState({ name: '', party: '', symbol: '', manifesto: '' });
-  const [saving, setSaving] = useState(false);
+  const queryClient = useQueryClient();
+  const [form, setForm] = useState({ name: '', party: '', symbol: '', manifesto: '', photoUrl: '' });
+  const [photoFile, setPhotoFile] = useState(null);
+  const [photoPreview, setPhotoPreview] = useState('');
+  const [uploadingPhoto, setUploadingPhoto] = useState(false);
   const [msg, setMsg] = useState(null);
 
-  const load = useCallback(async () => {
-    setLoading(true);
-    try {
+  // Fetch candidates using React Query
+  const { data: candidates = [], isLoading } = useQuery({
+    queryKey: ['candidates', slug, electionId],
+    queryFn: async () => {
       const r = await fetch(`/api/org/${slug}/elections/${electionId}/candidates`);
       const d = await r.json();
-      setCandidates(d.candidates || []);
-    } catch {}
-    setLoading(false);
-  }, [slug, electionId]);
+      return d.candidates || [];
+    },
+    enabled: !!slug && electionId != null,
+  });
 
-  useEffect(() => { load(); }, [load]);
+  const onPhotoSelect = (e) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    setPhotoFile(file);
+    setPhotoPreview(URL.createObjectURL(file));
+  };
 
-  const add = async () => {
-    setMsg(null); setSaving(true);
+  const clearPhoto = () => {
+    setPhotoFile(null);
+    setPhotoPreview('');
+    setForm((f) => ({ ...f, photoUrl: '' }));
+  };
+
+  const uploadPhoto = async () => {
+    if (!photoFile) return form.photoUrl;
+    setUploadingPhoto(true);
     try {
+      const fd = new FormData();
+      fd.append('file', photoFile);
+      fd.append('folder', `candidates/${slug}`);
+      const r = await fetch('/api/imagekit/upload', { method: 'POST', body: fd });
+      const d = await r.json();
+      if (!r.ok) throw new Error(d.error || 'Photo upload failed');
+      return d.url;
+    } finally {
+      setUploadingPhoto(false);
+    }
+  };
+
+  // Add Candidate Mutation
+  const addMutation = useMutation({
+    mutationFn: async (payload) => {
       const r = await fetch(`/api/org/${slug}/elections/${electionId}/candidates`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(form),
+        body: JSON.stringify(payload),
       });
       const d = await r.json();
       if (!r.ok) throw new Error(d.error);
-      setMsg({ type: 'success', text: `Candidate "${form.name}" added on-chain!` });
-      setForm({ name: '', party: '', symbol: '', manifesto: '' });
-      load();
-    } catch (e) { setMsg({ type: 'error', text: e.message }); }
-    setSaving(false);
+      return d;
+    },
+    onSuccess: (d) => {
+      setMsg({ type: 'success', text: `Candidate "${form.name}" added successfully.` });
+      setForm({ name: '', party: '', symbol: '', manifesto: '', photoUrl: '' });
+      clearPhoto();
+      queryClient.invalidateQueries({ queryKey: ['candidates', slug, electionId] });
+    },
+    onError: (e) => {
+      setMsg({ type: 'error', text: e.message });
+    }
+  });
+
+  const handleAdd = async () => {
+    setMsg(null);
+    try {
+      let photoUrl = form.photoUrl;
+      if (photoFile) {
+        photoUrl = await uploadPhoto();
+      }
+      addMutation.mutate({ ...form, photoUrl });
+    } catch (e) {
+      setMsg({ type: 'error', text: e.message });
+    }
   };
 
   return (
-    <div className="space-y-4">
-      <h4 className="text-white font-bold flex items-center gap-2 text-sm">
-        <UserPlus size={14} className="text-violet-400" /> Add Candidate
-      </h4>
-      <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
-        <FieldInput label="Name" value={form.name} onChange={e => setForm(f => ({ ...f, name: e.target.value }))} placeholder="Candidate full name" />
-        <FieldInput label="Party / Affiliation" value={form.party} onChange={e => setForm(f => ({ ...f, party: e.target.value }))} placeholder="Party or group" />
-        <FieldInput label="Symbol" value={form.symbol} onChange={e => setForm(f => ({ ...f, symbol: e.target.value }))} placeholder="e.g. 🦅 or Eagle" />
-        <FieldInput label="Manifesto (optional)" value={form.manifesto} onChange={e => setForm(f => ({ ...f, manifesto: e.target.value }))} placeholder="Brief manifesto…" multiline />
+    <div className="space-y-6">
+      <div>
+        <h4 className="text-ink font-semibold flex items-center gap-2 text-sm">
+          <UserPlus size={15} className="text-primary" /> Add Candidate
+        </h4>
+        <p className="text-xs text-body mt-0.5">Register a candidate for this election ballot.</p>
       </div>
+
+      <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+        <FieldInput label="Name" value={form.name} onChange={e => setForm(f => ({ ...f, name: e.target.value }))} placeholder="Full name" />
+        <FieldInput label="Party / Group" value={form.party} onChange={e => setForm(f => ({ ...f, party: e.target.value }))} placeholder="Affiliation" />
+        <FieldInput label="Ballot Symbol" value={form.symbol} onChange={e => setForm(f => ({ ...f, symbol: e.target.value }))} placeholder="e.g. 🦅" />
+        <FieldInput label="Manifesto" value={form.manifesto} onChange={e => setForm(f => ({ ...f, manifesto: e.target.value }))} placeholder="Candidate goals..." multiline />
+      </div>
+
+      <div>
+        <label className="block text-xs font-semibold text-body mb-2 uppercase tracking-wider">Candidate Photo</label>
+        <div className="flex items-center gap-4">
+          {photoPreview ? (
+            <div className="relative w-16 h-16 rounded-lg overflow-hidden border border-hairline">
+              <img src={photoPreview} alt="Preview" className="w-full h-full object-cover" />
+              <button type="button" onClick={clearPhoto} className="absolute top-1 right-1 bg-ink/75 hover:bg-ink rounded-full p-0.5 text-white transition cursor-pointer">
+                <X size={10} />
+              </button>
+            </div>
+          ) : (
+            <label className="flex items-center gap-2 cursor-pointer bg-canvas border border-dashed border-hairline hover:border-primary rounded-lg px-4 py-3 text-sm text-body transition">
+              <ImagePlus size={16} className="text-primary" />
+              <span>Choose photo</span>
+              <input type="file" accept="image/jpeg,image/png,image/webp" className="hidden" onChange={onPhotoSelect} />
+            </label>
+          )}
+          <span className="text-xs text-muted">JPEG, PNG, WebP format</span>
+        </div>
+      </div>
+
       {msg && <Toast type={msg.type} msg={msg.text} />}
-      <button onClick={add} disabled={saving || !form.name || !form.party || !form.symbol}
-        className="flex items-center gap-2 bg-violet-500 hover:bg-violet-600 disabled:opacity-50 text-white px-5 py-2.5 rounded-xl font-bold text-sm transition">
-        {saving ? <><Loader2 size={14} className="animate-spin" />Adding…</> : <><UserPlus size={14} />Add Candidate</>}
+
+      <button
+        onClick={handleAdd}
+        disabled={addMutation.isPending || uploadingPhoto || !form.name || !form.party || !form.symbol}
+        className="flex items-center gap-2 bg-primary hover:bg-primary-active text-white px-6 py-2.5 rounded-full font-semibold text-sm transition-all disabled:opacity-50 shadow-sm cursor-pointer"
+      >
+        {addMutation.isPending || uploadingPhoto ? (
+          <><Loader2 size={14} className="animate-spin" /> Registering...</>
+        ) : (
+          <><UserPlus size={14} /> Add Candidate</>
+        )}
       </button>
 
-      {/* Existing candidates */}
-      {loading ? (
-        <div className="flex justify-center py-4"><Loader2 className="animate-spin text-indigo-500" size={20} /></div>
-      ) : candidates.length > 0 && (
-        <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 mt-3">
-          {candidates.map(c => (
-            <div key={c.id} className="bg-slate-950/60 border border-slate-800 rounded-xl p-3 flex items-center gap-3">
-              <div className="w-8 h-8 rounded-lg bg-violet-950/50 border border-violet-500/20 flex items-center justify-center text-sm">
-                {c.symbol || '🗳️'}
+      {/* Candidate Grid */}
+      {isLoading ? (
+        <div className="flex justify-center py-4"><Loader2 className="animate-spin text-primary" size={20} /></div>
+      ) : candidates.length > 0 ? (
+        <div className="border-t border-hairline pt-6">
+          <h5 className="text-xs font-semibold text-body uppercase tracking-wider mb-3">Registered Candidates ({candidates.length})</h5>
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+            {candidates.map(c => (
+              <div key={c.id} className="bg-surface-soft border border-hairline rounded-lg p-3.5 flex items-center gap-3">
+                <div className="w-10 h-10 rounded-full bg-canvas border border-hairline flex items-center justify-center text-lg overflow-hidden shrink-0">
+                  {c.photoUrl ? (
+                    <img src={c.photoUrl} alt={c.name} className="w-full h-full object-cover" />
+                  ) : (
+                    c.symbol || '🗳️'
+                  )}
+                </div>
+                <div className="min-w-0">
+                  <p className="text-ink font-semibold text-sm truncate">{c.name}</p>
+                  <p className="text-body text-xs truncate">{c.party}</p>
+                </div>
               </div>
-              <div className="min-w-0">
-                <p className="text-white font-bold text-sm truncate">{c.name}</p>
-                <p className="text-slate-500 text-xs truncate">{c.party}</p>
-              </div>
-            </div>
-          ))}
+            ))}
+          </div>
         </div>
-      )}
+      ) : null}
     </div>
   );
 }
 
 // ── CSV Upload Panel ──────────────────────────────────────────────────────────
 function CsvUploadPanel({ orgSlug, orgId, electionId }) {
-  const [voters, setVoters]             = useState([]);
-  const [counts, setCounts]             = useState({ pending: 0, registered: 0, rejected: 0, total: 0 });
-  const [loadingVoters, setLoadingVoters] = useState(false);
-  const [uploading, setUploading]       = useState(false);
-  const [registering, setRegistering]   = useState(false);
+  const queryClient = useQueryClient();
+  const [uploading, setUploading] = useState(false);
   const [uploadResult, setUploadResult] = useState(null);
-  const [msg, setMsg]                   = useState(null);
+  const [msg, setMsg] = useState(null);
 
   const slug = orgSlug || '';
   const id   = orgId   ? String(orgId) : '';
 
-  const loadVoters = useCallback(async () => {
-    if ((!slug && !id) || electionId == null) return;
-    setLoadingVoters(true);
-    try {
+  // Fetch voters list
+  const { data = { voters: [], counts: { pending: 0, registered: 0, rejected: 0, total: 0 } }, isLoading: loadingVoters } = useQuery({
+    queryKey: ['voters', slug, electionId],
+    queryFn: async () => {
       const r = await fetch(`/api/voters/list?orgSlug=${slug}&electionId=${electionId}&limit=100`);
       const d = await r.json();
-      setVoters(d.voters || []);
-      if (d.counts) setCounts(d.counts);
-    } catch {}
-    setLoadingVoters(false);
-  }, [slug, id, electionId]);
+      return { voters: d.voters || [], counts: d.counts || { pending: 0, registered: 0, rejected: 0, total: 0 } };
+    },
+    enabled: !!slug && electionId != null,
+  });
 
-  useEffect(() => { loadVoters(); }, [loadVoters]);
+  const { voters, counts } = data;
 
   const { getRootProps, getInputProps, isDragActive } = useDropzone({
     accept: {
@@ -154,17 +246,14 @@ function CsvUploadPanel({ orgSlug, orgId, electionId }) {
       'text/plain':               ['csv'],
       'application/csv':          ['csv'],
       'application/vnd.ms-excel': ['csv'],
-      'application/octet-stream': ['csv'],
     },
     maxFiles: 1,
     onDropAccepted: async (acceptedFiles) => {
       const file = acceptedFiles[0];
       if (!file) return;
-      if (!slug && !id) {
-        setMsg({ type: 'error', text: 'Org not loaded yet — please wait and try again.' });
-        return;
-      }
-      setUploading(true); setMsg(null); setUploadResult(null);
+      setUploading(true);
+      setMsg(null);
+      setUploadResult(null);
 
       const fd = new FormData();
       fd.append('file', file);
@@ -178,25 +267,22 @@ function CsvUploadPanel({ orgSlug, orgId, electionId }) {
         if (!r.ok) throw new Error(d.error);
         setUploadResult(d);
         const parts = [
-          d.upserted > 0 ? `${d.upserted} new voter(s) added`         : '',
-          d.updated  > 0 ? `${d.updated} existing voter(s) refreshed`  : '',
-          d.errors?.length > 0 ? `${d.errors.length} row error(s)`      : '',
+          d.upserted > 0 ? `${d.upserted} new voter(s) added` : '',
+          d.updated  > 0 ? `${d.updated} voter(s) updated` : '',
         ].filter(Boolean);
-        setMsg({ type: 'success', text: parts.join(' · ') || 'CSV processed.' });
-        loadVoters();
+        setMsg({ type: 'success', text: parts.join(' · ') || 'CSV uploaded successfully.' });
+        queryClient.invalidateQueries({ queryKey: ['voters', slug, electionId] });
       } catch (e) {
         setMsg({ type: 'error', text: e.message });
+      } finally {
+        setUploading(false);
       }
-      setUploading(false);
-    },
-    onDropRejected: () => {
-      setMsg({ type: 'error', text: 'Invalid file. Please upload a .csv file.' });
     },
   });
 
-  const bulkRegister = async () => {
-    setRegistering(true); setMsg(null);
-    try {
+  // Bulk Register Mutation
+  const registerMutation = useMutation({
+    mutationFn: async () => {
       const r = await fetch('/api/voters/bulk-register', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -204,125 +290,135 @@ function CsvUploadPanel({ orgSlug, orgId, electionId }) {
       });
       const d = await r.json();
       if (!r.ok) throw new Error(d.error);
+      return d;
+    },
+    onSuccess: (d) => {
       setMsg({
         type: 'success',
-        text: `Registered ${d.registered} voter(s) on-chain!${d.failed > 0 ? ` (${d.failed} failed)` : ''}`,
+        text: d.message || `${d.registered || 0} registered on-chain. ${d.linked || 0} linked.`,
       });
-      loadVoters();
-    } catch (e) { setMsg({ type: 'error', text: e.message }); }
-    setRegistering(false);
-  };
+      queryClient.invalidateQueries({ queryKey: ['voters', slug, electionId] });
+    },
+    onError: (e) => {
+      setMsg({ type: 'error', text: e.message });
+    }
+  });
 
   return (
-    <div className="space-y-5">
-      {/* Upload card */}
-      <div className="bg-slate-900/60 border border-slate-800 rounded-2xl p-5">
-        <div className="flex items-center justify-between mb-3">
-          <h3 className="font-bold text-white flex items-center gap-2 text-sm">
-            <FileSpreadsheet size={14} className="text-indigo-400" /> Upload Voter List
+    <div className="space-y-6">
+      {/* Upload area */}
+      <div className="bg-canvas border border-hairline rounded-xl p-5 shadow-sm">
+        <div className="flex items-center justify-between mb-4">
+          <h3 className="font-semibold text-ink flex items-center gap-2 text-sm">
+            <FileSpreadsheet size={15} className="text-primary" /> Import Voter Database
           </h3>
           <a href="/api/voters/template" download
-            className="flex items-center gap-1.5 text-xs bg-slate-950 border border-slate-700 hover:border-indigo-500 text-slate-400 hover:text-indigo-300 px-3 py-1.5 rounded-lg transition">
+            className="flex items-center gap-1.5 text-xs bg-surface-strong border border-hairline hover:bg-hairline text-ink px-3 py-1.5 rounded-full font-medium transition cursor-pointer">
             <Download size={12} /> Template
           </a>
         </div>
-        <code className="block bg-slate-950 rounded-xl p-2.5 mb-3 text-xs text-slate-500 font-mono">
-          name, email, phone, gender, age
+        
+        <code className="block bg-surface-soft rounded-lg p-2.5 mb-4 text-xs text-body font-mono">
+          Header format: name, email, phone, gender, age
         </code>
 
         <div {...getRootProps()}
-          className={`border-2 border-dashed rounded-xl p-6 text-center cursor-pointer transition ${
-            isDragActive ? 'border-indigo-500 bg-indigo-500/5' : 'border-slate-800 hover:border-indigo-500/40'
-          }`}>
+          className={`border-2 border-dashed rounded-lg p-8 text-center cursor-pointer transition ${
+            isDragActive ? 'border-primary bg-primary/5' : 'border-hairline hover:border-primary/40'
+          }`}
+        >
           <input {...getInputProps()} />
           {uploading ? (
             <div className="flex flex-col items-center gap-2">
-              <Loader2 className="animate-spin text-indigo-500" size={24} />
-              <p className="text-slate-500 text-sm">Processing CSV…</p>
+              <Loader2 className="animate-spin text-primary" size={24} />
+              <p className="text-body text-sm">Processing database upload...</p>
             </div>
           ) : (
             <div className="flex flex-col items-center gap-2">
-              <Upload size={24} className="text-slate-700" />
-              <p className="text-slate-400 text-sm">
-                {isDragActive ? 'Drop CSV here…' : 'Drag & drop CSV, or click to browse'}
+              <Upload size={24} className="text-muted" />
+              <p className="text-body text-sm">
+                {isDragActive ? 'Drop file here...' : 'Drag & drop CSV file, or click to browse'}
               </p>
             </div>
           )}
         </div>
 
-        {msg && <Toast type={msg.type} msg={msg.text} />}
+        {msg && <div className="mt-4"><Toast type={msg.type} msg={msg.text} /></div>}
 
         {uploadResult?.errors?.length > 0 && (
-          <div className="mt-3 bg-slate-950 border border-slate-800 rounded-xl p-3 max-h-32 overflow-y-auto">
-            <p className="text-slate-600 text-xs mb-1 font-semibold">Row Errors ({uploadResult.errors.length}):</p>
-            {uploadResult.errors.map((e, i) => (
-              <p key={i} className="text-red-400 text-xs py-0.5">Row {e.row} · {e.email} — {e.reason}</p>
+          <div className="mt-4 bg-surface-soft border border-hairline rounded-lg p-3 max-h-32 overflow-y-auto">
+            <p className="text-ink text-xs mb-1 font-semibold">Validation Errors ({uploadResult.errors.length}):</p>
+            {uploadResult.errors.map((err, i) => (
+              <p key={i} className="text-semantic-down text-xs py-0.5">Row {err.row} · {err.email} — {err.reason}</p>
             ))}
           </div>
         )}
       </div>
 
-      {/* Voter list */}
+      {/* Voter table */}
       <div>
-        <div className="flex flex-wrap items-center justify-between gap-3 mb-3">
+        <div className="flex flex-wrap items-center justify-between gap-3 mb-4">
           <div className="flex items-center gap-2">
-            <h3 className="text-white font-bold flex items-center gap-2 text-sm">
-              <Users size={14} className="text-indigo-400" /> Voters
+            <h3 className="text-ink font-semibold flex items-center gap-2 text-sm">
+              <Users size={15} className="text-primary" /> Voter Registry
             </h3>
-            <span className="text-xs text-slate-500 bg-slate-900 border border-slate-800 rounded-full px-2 py-0.5">
+            <span className="text-xs font-mono font-semibold bg-surface-strong px-2 py-0.5 rounded-full text-ink">
               {counts.total} total
             </span>
-            <span className="text-xs text-amber-400 bg-amber-950/30 border border-amber-800/30 rounded-full px-2 py-0.5">
-              {counts.pending} pending
-            </span>
-            <span className="text-xs text-green-400 bg-green-950/30 border border-green-800/30 rounded-full px-2 py-0.5">
-              {counts.registered} on-chain
+            {counts.pending > 0 && (
+              <span className="text-xs font-mono font-semibold bg-amber-50 border border-amber-200 text-amber-700 px-2 py-0.5 rounded-full">
+                {counts.pending} pending
+              </span>
+            )}
+            <span className="text-xs font-mono font-semibold bg-green-50 border border-green-200 text-green-700 px-2 py-0.5 rounded-full">
+              {counts.registered} registered
             </span>
           </div>
-          <button onClick={loadVoters} className="text-xs text-slate-600 hover:text-white flex items-center gap-1 transition">
-            <RefreshCw size={11} /> Refresh
+          <button onClick={() => queryClient.invalidateQueries({ queryKey: ['voters', slug, electionId] })} className="text-xs text-body hover:text-ink flex items-center gap-1.5 transition cursor-pointer">
+            <RefreshCw size={11} /> Sync Status
           </button>
         </div>
 
         {counts.pending > 0 && (
-          <button onClick={bulkRegister} disabled={registering}
-            className="mb-3 w-full flex items-center justify-center gap-2 bg-indigo-500 hover:bg-indigo-600 disabled:opacity-50 text-white py-2.5 rounded-xl font-bold text-sm transition">
-            {registering
-              ? <><Loader2 size={14} className="animate-spin" /> Registering…</>
-              : <><CheckCircle size={14} /> Register {counts.pending} Pending Voter{counts.pending !== 1 ? 's' : ''} On-Chain</>
-            }
+          <button onClick={() => registerMutation.mutate()} disabled={registerMutation.isPending}
+            className="mb-4 w-full flex items-center justify-center gap-2 bg-primary hover:bg-primary-active disabled:opacity-50 text-white py-3 rounded-full font-semibold text-sm transition-all shadow-sm cursor-pointer"
+          >
+            {registerMutation.isPending ? (
+              <><Loader2 size={14} className="animate-spin" /> Transacting on-chain...</>
+            ) : (
+              <><CheckCircle size={14} /> Register {counts.pending} Pending Voters On-Chain</>
+            )}
           </button>
         )}
 
         {loadingVoters ? (
-          <div className="flex justify-center py-6"><Loader2 className="animate-spin text-indigo-500" size={20} /></div>
+          <div className="flex justify-center py-6"><Loader2 className="animate-spin text-primary" size={20} /></div>
         ) : voters.length === 0 ? (
-          <div className="text-center py-8 text-slate-600 text-sm border border-dashed border-slate-800 rounded-2xl">
-            No voters uploaded yet. Use the CSV upload above.
+          <div className="text-center py-10 text-body text-sm border border-dashed border-hairline rounded-xl bg-canvas">
+            No registered voters found. Use the import area to upload the CSV database.
           </div>
         ) : (
-          <div className="overflow-x-auto rounded-2xl border border-slate-800">
+          <div className="overflow-x-auto rounded-xl border border-hairline bg-canvas">
             <table className="w-full text-sm">
               <thead>
-                <tr className="bg-slate-900/80 border-b border-slate-800 text-slate-500 text-xs">
-                  <th className="text-left px-4 py-2.5 font-semibold">Name</th>
-                  <th className="text-left px-4 py-2.5 font-semibold">Email</th>
-                  <th className="text-left px-4 py-2.5 font-semibold hidden md:table-cell">Phone</th>
-                  <th className="text-left px-4 py-2.5 font-semibold">Status</th>
+                <tr className="bg-surface-soft border-b border-hairline text-body text-xs">
+                  <th className="text-left px-5 py-3 font-semibold">Name</th>
+                  <th className="text-left px-5 py-3 font-semibold">Email</th>
+                  <th className="text-left px-5 py-3 font-semibold hidden md:table-cell">Phone</th>
+                  <th className="text-left px-5 py-3 font-semibold">Registration Status</th>
                 </tr>
               </thead>
-              <tbody>
+              <tbody className="divide-y divide-hairline">
                 {voters.map((v, i) => (
-                  <tr key={v._id || i}
-                    className={`border-b border-slate-900 hover:bg-slate-900/40 transition ${i % 2 === 0 ? 'bg-slate-950/60' : 'bg-slate-950/30'}`}>
-                    <td className="px-4 py-2.5 text-white font-medium">{v.name}</td>
-                    <td className="px-4 py-2.5 text-slate-400 font-mono text-xs">{v.email}</td>
-                    <td className="px-4 py-2.5 text-slate-500 hidden md:table-cell">{v.phone || '—'}</td>
-                    <td className="px-4 py-2.5">
-                      <span className={`text-xs px-2 py-0.5 rounded-full border font-semibold ${
-                        v.status === 'registered' ? 'bg-green-950/50 text-green-400 border-green-800/30' :
-                        v.status === 'rejected'   ? 'bg-red-950/50   text-red-400   border-red-800/30'   :
-                                                    'bg-amber-950/30 text-amber-400 border-amber-800/30'
+                  <tr key={v._id || i} className="hover:bg-surface-soft/50 transition">
+                    <td className="px-5 py-3 text-ink font-medium">{v.name}</td>
+                    <td className="px-5 py-3 text-body font-mono text-xs">{v.email}</td>
+                    <td className="px-5 py-3 text-muted hidden md:table-cell">{v.phone || '—'}</td>
+                    <td className="px-5 py-3">
+                      <span className={`text-xs px-2.5 py-0.5 rounded-full border font-semibold ${
+                        v.status === 'registered' ? 'bg-green-50 text-green-700 border-green-200' :
+                        v.status === 'rejected'   ? 'bg-red-50 text-red-700 border-red-200'   :
+                                                    'bg-amber-50 text-amber-700 border-amber-200'
                       }`}>
                         {v.status}
                       </span>
@@ -340,8 +436,7 @@ function CsvUploadPanel({ orgSlug, orgId, electionId }) {
 
 // ── Elections Tab ─────────────────────────────────────────────────────────────
 function ElectionsTab({ slug, org }) {
-  const [elections, setElections] = useState([]);
-  const [loading, setLoading] = useState(true);
+  const queryClient = useQueryClient();
   const [form, setForm] = useState({ title: '', description: '', startTime: '', endTime: '' });
   const [saving, setSaving] = useState(false);
   const [msg, setMsg] = useState(null);
@@ -349,42 +444,51 @@ function ElectionsTab({ slug, org }) {
   const [expandedId, setExpandedId] = useState(null);
   const [phaseLoading, setPhaseLoading] = useState(null);
 
-  const load = useCallback(async () => {
-    setLoading(true);
-    try {
+  // Fetch elections list using React Query
+  const { data: elections = [], isLoading } = useQuery({
+    queryKey: ['elections', slug],
+    queryFn: async () => {
       const r = await fetch(`/api/org/${slug}/elections`);
       const d = await r.json();
-      setElections(d.elections || []);
-    } catch {}
-    finally { setLoading(false); }
-  }, [slug]);
+      return d.elections || [];
+    },
+    enabled: !!slug,
+  });
 
-  useEffect(() => { load(); }, [load]);
-
-  const create = async () => {
-    setMsg(null); setSaving(true);
-    try {
+  const createElectionMutation = useMutation({
+    mutationFn: async (payload) => {
       const r = await fetch(`/api/org/${slug}/elections`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          ...form,
-          startTime: form.startTime ? new Date(form.startTime).toISOString() : form.startTime,
-          endTime:   form.endTime   ? new Date(form.endTime).toISOString()   : form.endTime,
-        }),
+        body: JSON.stringify(payload),
       });
       const d = await r.json();
       if (!r.ok) throw new Error(d.error);
-      setMsg({ type: 'success', text: `Election "${form.title}" created!` });
+      return d;
+    },
+    onSuccess: (d) => {
+      setMsg({ type: 'success', text: `Election "${form.title}" created successfully.` });
       setForm({ title: '', description: '', startTime: '', endTime: '' });
       setShowForm(false);
-      setTimeout(() => load(), 1500);
-    } catch (e) { setMsg({ type: 'error', text: e.message }); }
-    setSaving(false);
+      queryClient.invalidateQueries({ queryKey: ['elections', slug] });
+    },
+    onError: (e) => {
+      setMsg({ type: 'error', text: e.message });
+    }
+  });
+
+  const handleCreate = () => {
+    setMsg(null);
+    createElectionMutation.mutate({
+      ...form,
+      startTime: form.startTime ? new Date(form.startTime).toISOString() : form.startTime,
+      endTime:   form.endTime   ? new Date(form.endTime).toISOString()   : form.endTime,
+    });
   };
 
   const handlePhaseAction = async (electionId, action) => {
     setPhaseLoading(electionId);
+    setMsg(null);
     try {
       const r = await fetch(`/api/org/${slug}/elections/${electionId}/phase`, {
         method: 'POST',
@@ -394,24 +498,26 @@ function ElectionsTab({ slug, org }) {
       const d = await r.json();
       if (!r.ok) throw new Error(d.error);
       setMsg({ type: 'success', text: d.message });
-      load();
-    } catch (e) { setMsg({ type: 'error', text: e.message }); }
-    setPhaseLoading(null);
+      queryClient.invalidateQueries({ queryKey: ['elections', slug] });
+    } catch (e) {
+      setMsg({ type: 'error', text: e.message });
+    } finally {
+      setPhaseLoading(null);
+    }
   };
 
-  // Guardian approval status badge
   const ApprovalBadge = ({ election }) => {
     if (election.phase === 2) return null;
     if (election.guardianApproved) {
       return (
-        <span className="text-xs px-2 py-0.5 rounded-full border font-semibold bg-green-950/40 text-green-400 border-green-800/30 flex items-center gap-1">
-          <Shield size={10} /> Guardian Verified
+        <span className="text-xs px-2.5 py-0.5 rounded-full border font-semibold bg-green-50 text-green-700 border-green-200 flex items-center gap-1">
+          <Shield size={10} /> Verified
         </span>
       );
     }
     if (election.pendingApproval) {
       return (
-        <span className="text-xs px-2 py-0.5 rounded-full border font-semibold bg-amber-950/40 text-amber-400 border-amber-800/30 flex items-center gap-1 animate-pulse">
+        <span className="text-xs px-2.5 py-0.5 rounded-full border font-semibold bg-amber-50 text-amber-700 border-amber-200 flex items-center gap-1 animate-pulse">
           <Clock size={10} /> Awaiting Guardian
         </span>
       );
@@ -421,55 +527,70 @@ function ElectionsTab({ slug, org }) {
 
   return (
     <div className="space-y-6">
-      <div className="flex items-center justify-between">
+      <div className="flex items-center justify-between border-b border-hairline pb-5">
         <div>
-          <h2 className="text-white font-black text-lg">Elections</h2>
-          <p className="text-slate-500 text-sm">{elections.length} total election{elections.length !== 1 ? 's' : ''}</p>
+          <h2 className="text-ink font-display font-normal text-2xl tracking-tight">Elections Overview</h2>
+          <p className="text-body text-sm mt-1">{elections.length} registered ballot{elections.length !== 1 ? 's' : ''}</p>
         </div>
         <div className="flex items-center gap-2">
-          <button onClick={load} className="flex items-center gap-1.5 text-xs text-slate-500 hover:text-white border border-slate-800 hover:border-slate-700 px-3 py-2 rounded-xl transition">
-            <RefreshCw size={12} /> Refresh
+          <button 
+            onClick={() => queryClient.invalidateQueries({ queryKey: ['elections', slug] })} 
+            className="flex items-center gap-1.5 text-xs text-body hover:text-ink border border-hairline px-3 py-2 rounded-full font-medium transition cursor-pointer bg-canvas"
+          >
+            <RefreshCw size={12} /> Sync
           </button>
-          <button onClick={() => setShowForm(f => !f)}
-            className="flex items-center gap-2 bg-indigo-500 hover:bg-indigo-600 text-white px-4 py-2.5 rounded-xl font-bold text-sm transition shadow-lg shadow-indigo-950/40">
-            <PlusCircle size={15} /> New Election
+          <button 
+            onClick={() => setShowForm(f => !f)}
+            className="flex items-center gap-2 bg-primary hover:bg-primary-active text-white px-4 py-2 rounded-full font-semibold text-sm transition-all shadow-sm cursor-pointer"
+          >
+            <PlusCircle size={15} /> Create Election
           </button>
         </div>
       </div>
 
       {msg && <Toast type={msg.type} msg={msg.text} />}
 
-      {showForm && (
-        <div className="bg-slate-900/60 border border-slate-800 rounded-2xl p-6 space-y-4">
-          <h3 className="text-white font-bold flex items-center gap-2">
-            <PlusCircle size={16} className="text-indigo-400" /> Create Election
-          </h3>
-          <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-            <FieldInput label="Title"       value={form.title}       onChange={e => setForm(f => ({ ...f, title:       e.target.value }))} placeholder="e.g. Student Body Election 2024" />
-            <FieldInput label="Description" value={form.description} onChange={e => setForm(f => ({ ...f, description: e.target.value }))} placeholder="Brief description…" multiline />
-            <FieldInput label="Start Time"  type="datetime-local" value={form.startTime} onChange={e => setForm(f => ({ ...f, startTime: e.target.value }))} />
-            <FieldInput label="End Time"    type="datetime-local" value={form.endTime}   onChange={e => setForm(f => ({ ...f, endTime:   e.target.value }))} />
-          </div>
-          <div className="flex gap-3">
-            <button onClick={() => setShowForm(false)} className="px-5 py-2.5 text-sm text-slate-400 hover:text-white border border-slate-700 rounded-xl transition">Cancel</button>
-            <button onClick={create} disabled={saving}
-              className="flex items-center gap-2 bg-indigo-500 hover:bg-indigo-600 disabled:opacity-50 text-white px-6 py-2.5 rounded-xl font-bold text-sm transition">
-              {saving ? <><Loader2 size={14} className="animate-spin" />Creating…</> : 'Create Election'}
-            </button>
-          </div>
-        </div>
-      )}
+      <AnimatePresence>
+        {showForm && (
+          <motion.div 
+            initial={{ opacity: 0, height: 0 }}
+            animate={{ opacity: 1, height: 'auto' }}
+            exit={{ opacity: 0, height: 0 }}
+            className="bg-canvas border border-hairline rounded-xl p-6 space-y-5 overflow-hidden shadow-sm"
+          >
+            <h3 className="text-ink font-semibold flex items-center gap-2">
+              <PlusCircle size={16} className="text-primary" /> Create Election Ballot
+            </h3>
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+              <FieldInput label="Election Title" value={form.title} onChange={e => setForm(f => ({ ...f, title: e.target.value }))} placeholder="Student Senate Election..." />
+              <FieldInput label="Description" value={form.description} onChange={e => setForm(f => ({ ...f, description: e.target.value }))} placeholder="Ballot information..." multiline />
+              <FieldInput label="Start Time" type="datetime-local" value={form.startTime} onChange={e => setForm(f => ({ ...f, startTime: e.target.value }))} />
+              <FieldInput label="End Time" type="datetime-local" value={form.endTime} onChange={e => setForm(f => ({ ...f, endTime: e.target.value }))} />
+            </div>
+            <div className="flex gap-3 border-t border-hairline pt-4">
+              <button onClick={() => setShowForm(false)} className="px-5 py-2.5 text-sm text-body hover:text-ink border border-hairline rounded-full transition cursor-pointer">Cancel</button>
+              <button 
+                onClick={handleCreate} 
+                disabled={createElectionMutation.isPending || !form.title}
+                className="flex items-center gap-2 bg-primary hover:bg-primary-active text-white px-6 py-2.5 rounded-full font-semibold text-sm transition shadow-sm cursor-pointer"
+              >
+                {createElectionMutation.isPending ? <><Loader2 size={14} className="animate-spin" /> Creating...</> : 'Save Election'}
+              </button>
+            </div>
+          </motion.div>
+        )}
+      </AnimatePresence>
 
-      {loading ? (
-        <div className="flex justify-center py-16"><Loader2 className="animate-spin text-indigo-500" size={28} /></div>
+      {isLoading ? (
+        <div className="flex justify-center py-16"><Loader2 className="animate-spin text-primary" size={28} /></div>
       ) : elections.length === 0 ? (
-        <div className="text-center py-16 border border-dashed border-slate-800 rounded-2xl">
-          <BarChart3 size={40} className="text-slate-700 mx-auto mb-3" />
-          <p className="text-slate-400 font-semibold">No elections yet</p>
-          <p className="text-slate-600 text-sm mt-1">Click &quot;New Election&quot; to create your first one</p>
+        <div className="text-center py-16 border border-dashed border-hairline rounded-xl bg-canvas shadow-sm">
+          <BarChart3 size={40} className="text-muted mx-auto mb-3" />
+          <p className="text-ink font-semibold">No elections found</p>
+          <p className="text-body text-sm mt-1">Create an election ballot to begin on-chain voting.</p>
         </div>
       ) : (
-        <div className="space-y-3">
+        <div className="space-y-4">
           {elections.map(e => {
             const isExpanded = expandedId === (e._id || e.id);
             const isRegistration = (e.phase ?? 0) === 0;
@@ -477,110 +598,123 @@ function ElectionsTab({ slug, org }) {
             const isCompleted = (e.phase ?? 0) === 2;
 
             return (
-              <div key={e._id || e.id}
-                className={`bg-slate-900/50 border rounded-2xl transition ${
-                  isExpanded ? 'border-indigo-500/40' : 'border-slate-800 hover:border-slate-700'
-                }`}>
-                {/* Election header row */}
+              <div key={e._id || e.id} className={`bg-canvas border rounded-xl transition-all shadow-sm ${
+                isExpanded ? 'border-primary/50' : 'border-hairline hover:border-body/30'
+              }`}>
+                {/* Election header */}
                 <button
                   onClick={() => setExpandedId(isExpanded ? null : (e._id || e.id))}
-                  className="w-full flex items-center justify-between p-5 text-left cursor-pointer">
+                  className="w-full flex items-center justify-between p-5 text-left cursor-pointer"
+                >
                   <div className="flex items-center gap-4 min-w-0">
                     <div className="min-w-0">
-                      <p className="text-white font-bold text-sm truncate">{e.title}</p>
-                      <p className="text-slate-500 text-xs mt-0.5 line-clamp-1">{e.description}</p>
+                      <p className="text-ink font-semibold text-base truncate">{e.title}</p>
+                      <p className="text-body text-xs mt-1 line-clamp-1">{e.description}</p>
                     </div>
                   </div>
-                  <div className="flex items-center gap-2 shrink-0 ml-4">
+                  <div className="flex items-center gap-3 shrink-0 ml-4">
                     <ApprovalBadge election={e} />
                     <span className={`text-xs px-2.5 py-0.5 rounded-full border font-semibold ${PHASE_COLORS[e.phase ?? 0]}`}>
                       {PHASE[e.phase ?? 0]}
                     </span>
                     <ChevronDown
                       size={16}
-                      className={`text-slate-500 transition-transform ${isExpanded ? 'rotate-180' : ''}`}
+                      className={`text-muted transition-transform ${isExpanded ? 'rotate-180' : ''}`}
                     />
                   </div>
                 </button>
 
-                {/* Expanded content */}
-                {isExpanded && (
-                  <div className="px-5 pb-6 border-t border-slate-800/60 space-y-6 pt-4">
-
-                    {/* Phase action buttons */}
-                    <div className="flex flex-wrap gap-2">
-                      {isRegistration && !e.pendingApproval && !e.guardianApproved && (
-                        <button
-                          onClick={() => handlePhaseAction(e.id, 'request-live')}
-                          disabled={phaseLoading === e.id}
-                          className="flex items-center gap-2 bg-green-500 hover:bg-green-600 disabled:opacity-50 text-white px-4 py-2 rounded-xl font-bold text-sm transition">
-                          {phaseLoading === e.id ? <Loader2 size={14} className="animate-spin" /> : <Play size={14} />}
-                          Request Go Live
-                        </button>
-                      )}
-                      {isRegistration && e.pendingApproval && (
-                        <div className="flex items-center gap-2 bg-amber-950/30 border border-amber-800/30 text-amber-400 px-4 py-2 rounded-xl text-sm font-semibold">
-                          <Clock size={14} className="animate-pulse" /> Waiting for Guardian Approval…
+                {/* Expanded contents */}
+                <AnimatePresence>
+                  {isExpanded && (
+                    <motion.div 
+                      initial={{ height: 0, opacity: 0 }}
+                      animate={{ height: 'auto', opacity: 1 }}
+                      exit={{ height: 0, opacity: 0 }}
+                      className="overflow-hidden border-t border-hairline bg-surface-soft/30"
+                    >
+                      <div className="p-6 space-y-6">
+                        {/* Status controllers */}
+                        <div className="flex flex-wrap gap-2">
+                          {isRegistration && !e.pendingApproval && !e.guardianApproved && (
+                            <button
+                              onClick={() => handlePhaseAction(e.id, 'request-live')}
+                              disabled={phaseLoading === e.id}
+                              className="flex items-center gap-2 bg-primary hover:bg-primary-active disabled:opacity-50 text-white px-5 py-2 rounded-full font-semibold text-sm transition cursor-pointer shadow-sm"
+                            >
+                              {phaseLoading === e.id ? <Loader2 size={14} className="animate-spin" /> : <Play size={14} />}
+                              Request Guardian Go-Live
+                            </button>
+                          )}
+                          {isRegistration && e.pendingApproval && (
+                            <div className="flex items-center gap-2 bg-amber-50 border border-amber-200 text-amber-700 px-4 py-2 rounded-full text-xs font-semibold">
+                              <Clock size={13} className="animate-pulse" /> Pending security clearance from Guardian Portal...
+                            </div>
+                          )}
+                          {isVoting && (
+                            <button
+                              onClick={() => handlePhaseAction(e.id, 'end-election')}
+                              disabled={phaseLoading === e.id}
+                              className="flex items-center gap-2 bg-semantic-down hover:opacity-90 disabled:opacity-50 text-white px-5 py-2 rounded-full font-semibold text-sm transition cursor-pointer shadow-sm"
+                            >
+                              {phaseLoading === e.id ? <Loader2 size={14} className="animate-spin" /> : <StopCircle size={14} />}
+                              Close Ballot
+                            </button>
+                          )}
+                          {isCompleted && (
+                            <div className="w-full space-y-6">
+                              <div className="flex items-center gap-2 text-body text-sm font-semibold">
+                                <CheckCircle2 size={16} className="text-primary" /> Official on-chain results compiled.
+                              </div>
+                              <div className="bg-canvas border border-hairline rounded-xl p-5 shadow-sm">
+                                <ElectionResults slug={slug} electionId={e.id} electionTitle={e.title} compact />
+                              </div>
+                            </div>
+                          )}
                         </div>
-                      )}
-                      {isVoting && (
-                        <button
-                          onClick={() => handlePhaseAction(e.id, 'end-election')}
-                          disabled={phaseLoading === e.id}
-                          className="flex items-center gap-2 bg-red-500 hover:bg-red-600 disabled:opacity-50 text-white px-4 py-2 rounded-xl font-bold text-sm transition">
-                          {phaseLoading === e.id ? <Loader2 size={14} className="animate-spin" /> : <StopCircle size={14} />}
-                          End Election
-                        </button>
-                      )}
-                      {isCompleted && (
-                        <div className="flex items-center gap-2 text-slate-400 text-sm">
-                          <CheckCircle2 size={14} className="text-slate-500" /> Election completed — results are public
-                        </div>
-                      )}
-                    </div>
 
-                    {/* Candidate management (Registration phase only) */}
-                    {isRegistration && (
-                      <div className="bg-slate-900/40 border border-slate-800/60 rounded-2xl p-5">
-                        <CandidatePanel slug={slug} electionId={e.id} />
+                        {/* Candidate Panel */}
+                        {isRegistration && (
+                          <div className="bg-canvas border border-hairline rounded-xl p-5 shadow-sm">
+                            <CandidatePanel slug={slug} electionId={e.id} />
+                          </div>
+                        )}
+
+                        {/* Voter Import */}
+                        {isRegistration && (
+                          <div className="space-y-2.5">
+                            <h4 className="text-xs font-semibold text-body uppercase tracking-wider">Voter Registry Setup</h4>
+                            <p className="text-body text-xs leading-relaxed">
+                              Upload database containing eligible voters for this ballot. Each election manages an independent voter register.
+                            </p>
+                            <CsvUploadPanel orgSlug={slug} orgId={org?._id} electionId={e.id} />
+                          </div>
+                        )}
+
+                        {/* Voter connection sharing */}
+                        {isVoting && (
+                          <div className="bg-green-50 border border-green-200 rounded-xl p-5 text-green-700">
+                            <h4 className="font-semibold text-sm mb-2 flex items-center gap-2">
+                              <Vote size={15} /> Voting Portal is Open
+                            </h4>
+                            <p className="text-body text-xs mb-3">Distribute this URL to eligible voters. Authentication is verified on-chain:</p>
+                            <div className="bg-canvas border border-hairline rounded-lg px-4 py-3 flex items-center justify-between gap-3">
+                              <code className="text-primary text-xs font-mono truncate">
+                                {typeof window !== 'undefined' ? `${window.location.origin}/vote/${slug}` : `/vote/${slug}`}
+                              </code>
+                              <button
+                                onClick={() => navigator.clipboard.writeText(`${window.location.origin}/vote/${slug}`)}
+                                className="text-xs bg-primary hover:bg-primary-active text-white px-3 py-1.5 rounded-full font-semibold transition shrink-0 cursor-pointer"
+                              >
+                                Copy Link
+                              </button>
+                            </div>
+                          </div>
+                        )}
                       </div>
-                    )}
-
-                    {/* Voter CSV upload (Registration phase) */}
-                    {isRegistration && (
-                      <div>
-                        <div className="flex items-center gap-2 mb-1">
-                          <FileSpreadsheet size={14} className="text-blue-400" />
-                          <p className="text-blue-300 text-xs font-bold uppercase tracking-wider">Voter Import — Registration Phase</p>
-                        </div>
-                        <p className="text-slate-500 text-xs mb-3">
-                          Upload a CSV to add voters for this election. Each election has its own separate voter list.
-                        </p>
-                        <CsvUploadPanel orgSlug={slug} orgId={org?._id} electionId={e.id} />
-                      </div>
-                    )}
-
-                    {/* Voter link for live elections */}
-                    {isVoting && (
-                      <div className="bg-green-950/20 border border-green-800/30 rounded-2xl p-5">
-                        <h4 className="text-green-400 font-bold text-sm mb-2 flex items-center gap-2">
-                          <Vote size={14} /> Election is LIVE
-                        </h4>
-                        <p className="text-slate-400 text-sm mb-3">Share this link with your voters:</p>
-                        <div className="bg-slate-950 border border-slate-800 rounded-xl px-4 py-3 flex items-center justify-between gap-3">
-                          <code className="text-indigo-300 text-sm font-mono truncate">
-                            {typeof window !== 'undefined' ? `${window.location.origin}/vote/${slug}` : `/vote/${slug}`}
-                          </code>
-                          <button
-                            onClick={() => navigator.clipboard.writeText(`${window.location.origin}/vote/${slug}`)}
-                            className="text-xs bg-indigo-500 hover:bg-indigo-600 text-white px-3 py-1.5 rounded-lg font-bold transition shrink-0">
-                            Copy
-                          </button>
-                        </div>
-                      </div>
-                    )}
-                  </div>
-                )}
+                    </motion.div>
+                  )}
+                </AnimatePresence>
               </div>
             );
           })}
@@ -611,8 +745,8 @@ export default function DashboardPage() {
 
   if (status === 'loading') {
     return (
-      <div className="min-h-screen bg-[#020617] flex items-center justify-center">
-        <Loader2 size={36} className="animate-spin text-indigo-500" />
+      <div className="min-h-screen bg-canvas flex items-center justify-center">
+        <Loader2 size={32} className="animate-spin text-primary" />
       </div>
     );
   }
@@ -623,78 +757,102 @@ export default function DashboardPage() {
   const orgName = org?.name || session.user.name || slug;
 
   return (
-    <div className="min-h-screen bg-[#020617] text-white">
-      <div className="flex min-h-screen">
+    <div className="min-h-screen bg-canvas text-ink flex flex-col md:flex-row font-sans">
+      
+      {/* Sidebar - Desktop */}
+      <aside className="hidden md:flex w-64 shrink-0 border-r border-hairline bg-surface-soft flex-col">
+        {/* Logo */}
+        <div className="p-6 border-b border-hairline">
+          <div className="flex items-center gap-2.5">
+            <div className="w-8 h-8 rounded-full bg-primary flex items-center justify-center">
+              <Vote size={16} className="text-white" />
+            </div>
+            <span className="font-bold text-ink text-base tracking-tight">Block Vote</span>
+          </div>
+        </div>
 
-        {/* Sidebar */}
-        <aside className="w-64 shrink-0 border-r border-white/5 bg-slate-950/60 flex flex-col">
-          {/* Logo */}
-          <div className="p-5 border-b border-white/5">
-            <div className="flex items-center gap-2.5">
-              <div className="w-8 h-8 rounded-lg bg-gradient-to-br from-indigo-500 to-violet-600 flex items-center justify-center">
-                <Vote size={16} className="text-white" />
-              </div>
-              <span className="font-black text-sm tracking-tight">Block Vote</span>
+        {/* Organization Info */}
+        <div className="p-4 border-b border-hairline">
+          <div className="flex items-center gap-3 bg-canvas border border-hairline rounded-xl p-3.5 shadow-sm">
+            <div className="w-9 h-9 rounded-full bg-surface-strong flex items-center justify-center shrink-0 text-primary">
+              <Building2 size={16} />
+            </div>
+            <div className="min-w-0">
+              <p className="text-ink font-bold text-sm truncate">{orgName}</p>
+              <p className="text-body text-xs capitalize">{org?.type || 'Organization'}</p>
             </div>
           </div>
+        </div>
 
-          {/* Org info */}
-          <div className="p-4 border-b border-white/5">
-            <div className="flex items-center gap-3 bg-slate-900/60 rounded-xl p-3">
-              <div className="w-9 h-9 rounded-xl bg-indigo-950/80 border border-indigo-500/20 flex items-center justify-center shrink-0">
-                <Building2 size={16} className="text-indigo-400" />
-              </div>
-              <div className="min-w-0">
-                <p className="text-white font-bold text-sm truncate">{orgName}</p>
-                <p className="text-slate-500 text-xs">{org?.type || 'Organization'}</p>
-              </div>
-            </div>
+        {/* Navigation links */}
+        <nav className="flex-1 p-4 space-y-1.5">
+          <div className="flex items-center gap-2.5 w-full px-4 py-3 rounded-full text-sm font-semibold bg-primary/10 text-primary border border-primary/20">
+            <BarChart3 size={15} /> 
+            <span>Elections Portal</span>
+            <ChevronRight size={13} className="text-primary ml-auto" />
           </div>
+          <p className="text-muted text-xs px-4 pt-2.5 leading-relaxed">
+            Admin console for configuration, voters list uploads, and ballot outcomes.
+          </p>
+        </nav>
 
-          {/* Navigation */}
-          <nav className="flex-1 p-3 space-y-1">
-            <div className="flex items-center gap-2.5 w-full px-3 py-2.5 rounded-xl text-sm font-semibold bg-indigo-500/15 text-indigo-300 border border-indigo-500/20">
-              <BarChart3 size={15} /> Elections
-              <ChevronRight size={13} className="text-indigo-400 ml-auto" />
-            </div>
-            <p className="text-slate-600 text-xs px-3 pt-2">
-              Manage elections, candidates, and voters.
-            </p>
-          </nav>
-
-          {/* User + Sign out */}
-          <div className="p-3 border-t border-white/5">
-            <div className="px-3 py-2 mb-1">
-              <p className="text-xs text-slate-500 truncate">{session.user.email}</p>
-            </div>
-            <button
-              id="dashboard-signout-btn"
-              onClick={() => signOut({ callbackUrl: '/' })}
-              className="w-full flex items-center gap-2.5 px-3 py-2.5 rounded-xl text-sm text-red-400 hover:text-red-300 hover:bg-red-500/5 transition font-semibold">
-              <LogOut size={15} /> Sign out
-            </button>
+        {/* User context / Sign out */}
+        <div className="p-4 border-t border-hairline">
+          <div className="px-4 py-2 mb-2">
+            <p className="text-xs text-muted truncate font-mono">{session.user.email}</p>
           </div>
-        </aside>
+          <button
+            id="dashboard-signout-btn"
+            onClick={() => signOut({ callbackUrl: '/' })}
+            className="w-full flex items-center gap-2.5 px-4 py-3 rounded-full text-sm text-semantic-down hover:bg-red-50 transition-all font-semibold cursor-pointer border border-transparent hover:border-red-100"
+          >
+            <LogOut size={15} /> 
+            <span>Sign out</span>
+          </button>
+        </div>
+      </aside>
 
-        {/* Main content */}
-        <main className="flex-1 overflow-auto">
-          {/* Top bar */}
-          <div className="sticky top-0 z-10 border-b border-white/5 bg-[#020617]/90 backdrop-blur-xl px-8 py-4 flex items-center justify-between">
-            <div>
-              <h1 className="text-white font-black text-lg">Elections</h1>
-              <p className="text-slate-500 text-xs">{orgName} · Admin Dashboard</p>
-            </div>
-            <span className="text-xs bg-amber-500/15 text-amber-400 border border-amber-500/25 px-3 py-1 rounded-full font-semibold">
-              Org Admin
+      {/* Mobile Top Bar */}
+      <div className="md:hidden border-b border-hairline bg-canvas px-6 py-4 flex items-center justify-between gap-3 sticky top-0 z-20">
+        <div className="flex items-center gap-2">
+          <div className="w-6 h-6 rounded-full bg-primary flex items-center justify-center">
+            <Vote size={12} className="text-white" />
+          </div>
+          <span className="font-bold text-ink text-sm">Block Vote</span>
+        </div>
+        <div className="flex items-center gap-2">
+          <ThemeToggle />
+          <button
+            onClick={() => signOut({ callbackUrl: '/' })}
+            className="flex items-center gap-1 text-xs text-semantic-down border border-red-200 bg-red-50/50 px-2.5 py-1.5 rounded-full font-semibold cursor-pointer"
+          >
+            <LogOut size={11} /> Out
+          </button>
+        </div>
+      </div>
+
+      {/* Main Container */}
+      <main className="flex-1 overflow-auto bg-canvas">
+        {/* Breadcrumb row */}
+        <div className="border-b border-hairline bg-surface-soft/40 px-6 sm:px-10 py-5 flex items-center justify-between gap-3">
+          <div className="min-w-0">
+            <h1 className="text-ink font-semibold text-lg">Ballot Manager</h1>
+            <p className="text-body text-xs truncate mt-0.5">{orgName} Administration Dashboard</p>
+          </div>
+          <div className="flex items-center gap-3">
+            <ThemeToggle />
+            <span className="hidden sm:inline text-xs bg-primary/10 border border-primary/20 text-primary px-3 py-1 rounded-full font-semibold">
+              Institutional Admin
             </span>
           </div>
+        </div>
 
-          {/* Content */}
-          <div className="px-8 py-8 max-w-5xl">
-            {slug && <ElectionsTab slug={slug} org={org} />}
-          </div>
-        </main>
-      </div>
+        {/* Tab content panel */}
+        <div className="px-6 sm:px-10 py-8 max-w-5xl">
+          {slug && <ElectionsTab slug={slug} org={org} />}
+        </div>
+      </main>
+
     </div>
   );
 }

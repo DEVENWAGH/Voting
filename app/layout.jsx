@@ -1,6 +1,7 @@
 import "./globals.css";
 import { WalletProvider } from "@/context/WalletContext";
 import SessionProviderWrapper from "@/components/SessionProviderWrapper";
+import QueryProviderWrapper from "@/components/QueryProviderWrapper";
 
 export const metadata = {
   title: "Block Vote — Blockchain Voting for Organizations",
@@ -13,9 +14,11 @@ export default function RootLayout({ children }) {
     <html lang="en">
       <body>
         <SessionProviderWrapper>
-          <WalletProvider>
-            <main>{children}</main>
-          </WalletProvider>
+          <QueryProviderWrapper>
+            <WalletProvider>
+              <main>{children}</main>
+            </WalletProvider>
+          </QueryProviderWrapper>
         </SessionProviderWrapper>
       </body>
     </html>

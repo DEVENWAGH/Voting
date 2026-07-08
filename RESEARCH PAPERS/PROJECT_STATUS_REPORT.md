@@ -3,7 +3,7 @@
 ## Project Status Report — July 2026
 
 > **Project Type:** College Research Project
-> **Stack:** Next.js 15 · Solidity · Ethereum · MongoDB · Hardhat · OpenZeppelin
+> **Stack:** Next.js 15 · Solidity · Ethereum · MongoDB · Pinata IPFS · ImageKit · Hardhat · OpenZeppelin
 > **Contract:** `VotingV1.sol` (UUPS Upgradeable Proxy)
 
 ---
@@ -11,13 +11,14 @@
 ## Table of Contents
 
 1. [Concept Clarifications](#concept-clarifications)
-2. [Architecture Overview](#architecture-overview)
-3. [Implemented Features](#implemented-features)
-4. [Missing / Incomplete Features](#missing--incomplete-features)
-5. [Dropped Features](#dropped-features)
-6. [MVP Priority Checklist](#mvp-priority-checklist)
-7. [Post-MVP / v2 Roadmap](#post-mvp--v2-roadmap)
-8. [Tech Stack Status](#tech-stack-status)
+2. [Data Persistence Model](#data-persistence-model)
+3. [Architecture Overview](#architecture-overview)
+4. [Implemented Features](#implemented-features)
+5. [Missing / Incomplete Features](#missing--incomplete-features)
+6. [Dropped Features](#dropped-features)
+7. [MVP Priority Checklist](#mvp-priority-checklist)
+8. [Post-MVP / v2 Roadmap](#post-mvp--v2-roadmap)
+9. [Tech Stack Status](#tech-stack-status)
 
 ---
 
@@ -62,8 +63,19 @@ IPFS (InterPlanetary File System) is a **decentralized file storage** network, n
 
 You store a CID (content hash) from IPFS on-chain, proving the file hasn't been tampered with.
 
-**Status in this project:** ❌ Not implemented.
-Currently using **ImageKit CDN** (centralized) for photos and **MongoDB** for all data. IPFS is listed in the vision but not in the codebase. This is a **Post-MVP** feature.
+**Status in this project:** ✅ Partially implemented via **Pinata IPFS**.
+
+`lib/ipfs.js` pins JSON metadata to IPFS through the Pinata API. CIDs are stored in MongoDB and returned in API responses:
+
+| Action | What gets pinned to IPFS |
+| ------ | ------------------------ |
+| Create election | Election metadata (title, description, times, org) |
+| Add candidate | Candidate metadata (name, party, symbol, manifesto, txHash) |
+| Upload voter CSV | Anonymised voter roster audit snapshot |
+
+Candidate **photos** still use **ImageKit CDN** (centralized), not IPFS files yet. IPFS pinning is **non-fatal** — if `PINATA_JWT` is missing, the app continues but skips pinning.
+
+**Persistence:** Pinata pins survive dev server restarts. Data remains on IPFS/Pinata cloud as long as the pin is active and your Pinata account/quota allows it. MongoDB stores the `ipfsCid` reference so the app can link back to the content.
 
 ---
 
@@ -80,8 +92,73 @@ Deploying the smart contract on multiple blockchains (Ethereum, Polygon, BSC, Ar
 
 A verifiable record of every vote transaction that anyone can independently verify.
 
-**Status in this project:** ✅ Partially implemented.
-The analytics page already shows `txHash` + `blockNumber` for every vote in the activity feed. What's missing is a **dedicated public audit page** where any voter can verify their vote was counted using their transaction hash — without needing to be logged in.
+**Status in this project:** ✅ Implemented.
+Public page at `/verify` + `GET /api/audit/verify?txHash=0x...`. Voters receive a receipt email after voting with their transaction hash and a direct verify link.
+
+---
+
+## Data Persistence Model
+
+The app uses **four storage layers**. They do **not** all behave the same when you stop `yarn dev`.
+
+| Layer | Technology | What it stores | Survives dev server stop? |
+| ----- | ---------- | -------------- | --------------------------- |
+| App database | **MongoDB Atlas** (`MONGODB_URI` → `votingdapp`) | Orgs, elections metadata, voters, OTP, analytics, gas tx log, `ipfsCid` references | ✅ Yes |
+| Audit / metadata archive | **Pinata IPFS** (`PINATA_JWT`) | Election JSON, candidate JSON, voter roster snapshots | ✅ Yes (cloud pins) |
+| Candidate photos | **ImageKit CDN** | Uploaded candidate images | ✅ Yes (cloud CDN) |
+| Vote ledger | **Hardhat local node** (`http://127.0.0.1:8545`) | Elections, votes, registrations, vote counts on-chain | ❌ No — in-memory chain resets |
+
+### MongoDB (persistent)
+
+- Connection: `lib/db.js` → `MONGODB_URI`
+- Stores operational data the app queries every day
+- Survives Next.js restarts and laptop reboots (if Atlas/local Mongo is running)
+- **Does not** store on-chain vote counts — those live on the blockchain
+
+### Pinata IPFS (persistent)
+
+- Utility: `lib/ipfs.js` — `pinJSON()`, `pinFile()`, `getIPFSUrl()`, `fetchFromIPFS()`
+- Pins are uploaded to Pinata's cloud pinning service → content stays on IPFS network
+- Each pin gets a **CID** (content identifier); immutable content address
+- MongoDB `Election.ipfsCid` stores the reference; API responses also return `ipfsUrl`
+- **Requires:** `PINATA_JWT` in `.env` (optional `PINATA_GATEWAY` for custom gateway)
+- **Free tier limits:** Pinata has storage/pin quotas — old pins remain until you unpin or account expires
+- Pinning failures are logged as **non-fatal** — MongoDB + on-chain flow still works
+
+### ImageKit (persistent)
+
+- Candidate photo upload via `POST /api/imagekit/upload`
+- Photo URLs stored on-chain in `Candidate.photoUrl`
+- Survives restarts (cloud CDN)
+- **Requires:** `IMAGEKIT_PUBLIC_KEY`, `IMAGEKIT_PRIVATE_KEY`, `IMAGEKIT_URL_ENDPOINT`
+
+### Hardhat local blockchain (NOT persistent)
+
+- `yarn dev` starts a fresh in-memory chain and redeploys the contract
+- All on-chain state (elections, votes, registrations) is **lost** when the Hardhat node stops
+- MongoDB may still reference old `electionId`s → **split-brain** if chain resets but DB does not
+
+### Recommended dev workflow (keep data)
+
+```bash
+# Terminal 1 — keep running (do not stop)
+yarn hardhat:node
+
+# Terminal 2 — only once, or when you want a clean chain
+yarn deploy:proxy
+
+# Terminal 3 — Next.js only (no redeploy)
+yarn dev:next-only
+```
+
+### Recommended production persistence
+
+| Component | Recommendation |
+| --------- | -------------- |
+| MongoDB | MongoDB Atlas (always on) |
+| IPFS | Pinata paid/free tier with `PINATA_JWT` |
+| Photos | ImageKit or migrate to IPFS `pinFile()` in v2 |
+| Blockchain | Sepolia / Polygon testnet or mainnet — persistent chain |
 
 ---
 
@@ -99,8 +176,9 @@ Next.js Frontend (React)
     ├── /api/analytics/*    → MongoDB aggregation pipeline
     └── /api/biometric/*    → Face landmark register/verify
          │
-         ├── MongoDB         → Voter records, elections, candidates, analytics
-         ├── ImageKit CDN    → Candidate photos (centralized, temporary)
+         ├── MongoDB         → Voter records, elections, analytics, ipfsCid refs
+         ├── Pinata IPFS     → Election/candidate/voter-list JSON audit pins
+         ├── ImageKit CDN    → Candidate photos (centralized CDN)
          └── Ethereum Node
               │
               └── VotingV1.sol (UUPS Proxy)
@@ -139,7 +217,12 @@ Next.js Frontend (React)
 | Route                                            | Purpose                              |
 | ------------------------------------------------ | ------------------------------------ |
 | `POST /api/auth/send-otp`                        | Send OTP email to voter              |
-| `POST /api/auth/verify-otp`                      | Verify OTP, create session           |
+| `POST /api/auth/verify-otp`                      | Verify OTP, cast vote, send receipt email |
+| `GET /api/audit/verify`                          | Public vote verification by txHash      |
+| `GET /api/elections/public`                      | Global public election ledger           |
+| `GET /api/org/[slug]/elections/[id]/results`     | Org-scoped on-chain results             |
+| `GET /api/relay/transactions`                    | Gas station history + analytics         |
+| `POST /api/imagekit/upload`                      | Candidate photo upload to ImageKit      |
 | `POST /api/org-auth/signup`                      | Org registration                     |
 | `POST /api/org-auth/verify-email`                | Org email verification               |
 | `GET/POST /api/org/[slug]/elections`             | List / create elections              |
@@ -166,13 +249,27 @@ Next.js Frontend (React)
 | `/signup`         | Org registration                          |
 | `/login`          | Org login                                 |
 | `/dashboard`      | Org admin — elections, candidates, voters |
-| `/vote/[slug]`    | Voter-facing voting interface             |
-| `/analytics`      | Real-time analytics dashboard             |
-| `/biometric`      | Face registration & verification          |
-| `/connect-wallet` | Wallet connection page                    |
-| `/admin`          | Super-admin panel                         |
-| `/admin-auth`     | Admin authentication                      |
-| `/elections/[id]` | Election detail view                      |
+| `/vote/[slug]`    | Voter portal — live voting + published results |
+| `/elections`      | Global public results ledger                   |
+| `/verify`         | Public vote verification by txHash             |
+| `/analytics`      | Real-time analytics dashboard                  |
+| `/biometric`      | Face registration & verification               |
+| `/connect-wallet` | Wallet connection page                         |
+| `/admin`          | Guardian portal (approvals, gas, governance)    |
+| `/admin-auth`     | Guardian authentication                        |
+| `/elections/[id]` | Election detail + on-chain results             |
+
+---
+
+### ✅ IPFS / Pinata (Audit Metadata)
+
+| Feature | Details |
+| ------- | ------- |
+| Pinata JSON pinning | `lib/ipfs.js` — election, candidate, voter-roster snapshots |
+| CID storage | `Election.ipfsCid` in MongoDB + `ipfsUrl` in API responses |
+| Non-fatal pinning | App continues if `PINATA_JWT` unset; logs warning only |
+| Persistence | Pins survive dev restarts (cloud-hosted on Pinata/IPFS network) |
+| Candidate photos | Still on ImageKit — `pinFile()` for images is v2 |
 
 ---
 
@@ -209,41 +306,20 @@ Next.js Frontend (React)
 
 ## Missing / Incomplete Features
 
-### 🔴 Critical (Breaks Core Flow)
-
-| Feature                    | Issue                                                              | Fix Needed                                                               |
-| -------------------------- | ------------------------------------------------------------------ | ------------------------------------------------------------------------ |
-| `/api/relay/vote/route.js` | **File does not exist** — the vote casting relay is missing        | Create the relay vote API that calls `castVoteRelayed()` on the contract |
-| End-to-end voter vote flow | Cannot verify if `/vote/[slug]` page works without the relay route | Test + fix after relay route is created                                  |
-
----
-
-### 🟠 Near-MVP (Should have before demo)
-
-| Feature                      | Issue                                                                             |
-| ---------------------------- | --------------------------------------------------------------------------------- |
-| Candidate photo upload       | ImageKit auth endpoint exists but upload is not wired to the Add Candidate form   |
-| Public election results page | Results are accessible to admins; needs a public-facing results view              |
-| Public election ledger       | `/api/elections/public` endpoint referenced in pages but missing                  |
-| Audit trail page             | txHash exists in analytics feed but no dedicated "verify my vote" page for voters |
-| Mobile responsiveness polish | Functional but needs testing on small screens                                     |
-
----
-
 ### 🟡 Post-MVP / v2 (Nice to have)
 
 | Feature                          | Notes                                                         |
 | -------------------------------- | ------------------------------------------------------------- |
-| IPFS storage                     | Replace ImageKit with IPFS for candidate photos/manifestos    |
+| IPFS for candidate photos        | JSON metadata pinned today; photos still on ImageKit CDN      |
 | Real biometric (AWS Rekognition) | Replace simulated landmarks with real face recognition        |
 | Digital Voter ID                 | Issue a cryptographic voter ID card post-registration         |
-| Governance UI                    | Guardian upgrade proposal UI is placeholder only              |
-| Multi-chain deployment           | Polygon, Arbitrum — just Hardhat config changes               |
-| Layer-2 support                  | Lower gas costs — deploy on Polygon Mumbai / Arbitrum Sepolia |
+| Multi-chain deployment           | Polygon, Arbitrum — Hardhat config + env changes              |
+| Layer-2 support                  | Lower gas costs — deploy on Polygon / Arbitrum Sepolia        |
 | Verifiable decryption            | ZK-proof based vote tallying — research-grade                 |
 | Cryptographic commitments        | Homomorphic encryption for votes — research-grade             |
 | DID / Self-sovereign identity    | W3C DID, Polygon ID integration                               |
 | Serverless edge functions        | Move analytics to Vercel Edge / Cloudflare Workers            |
+| Skip-redeploy on `yarn dev`      | Optional: detect existing contract before redeploying         |
 
 ---
 
@@ -261,17 +337,21 @@ Next.js Frontend (React)
 ```
 MVP MUST-HAVE (before final demo)
 ──────────────────────────────────
-[ ] 1. Create /api/relay/vote/route.js  ← MOST CRITICAL
-[ ] 2. Verify /vote/[slug] end-to-end voter flow works
-[ ] 3. Wire candidate photo upload to ImageKit
-[ ] 4. Create public election results page
-[ ] 5. Create /api/elections/public endpoint
+[x] 1. Relay vote API + OTP voting flow
+[x] 2. End-to-end /vote/[slug] voter flow
+[x] 3. Candidate photo upload (ImageKit)
+[x] 4. Public election results (/elections, /vote/[slug] results tab)
+[x] 5. /api/elections/public endpoint
+[x] 6. Verify my vote page (/verify) + receipt email
+[x] 7. Guardian governance UI (2-of-3 UUPS upgrades)
+[x] 8. Gas station history + analytics on Guardian portal
+[~] 9. Mobile UI polish (basic pass done; full QA optional)
 
 MVP NICE-TO-HAVE (if time allows)
 ──────────────────────────────────
-[ ] 6. Basic "verify my vote" audit page (enter txHash → confirm)
-[ ] 7. Mobile UI polish pass
-[ ] 8. Guardian governance UI (not just backend)
+[ ] 10. IPFS pinFile for candidate photos (photos still on ImageKit)
+[ ] 11. Skip-redeploy logic for yarn dev
+[ ] 12. Sepolia testnet as default persistent chain
 ```
 
 ---
@@ -282,11 +362,10 @@ MVP NICE-TO-HAVE (if time allows)
 v2 Features (After Research Paper Submission)
 ──────────────────────────────────────────────
 [ ] Real biometric — AWS Rekognition or MediaPipe WASM
-[ ] IPFS storage — candidate photos + election documents
+[ ] IPFS pinFile — candidate photos + binary documents on IPFS
 [ ] Digital Voter ID — NFT or cryptographic certificate
 [ ] Multi-chain — Polygon / Arbitrum deployment
 [ ] ZK proofs — anonymous voter verification
-[ ] DAO governance — on-chain guardian management
 [ ] Serverless analytics — Vercel Edge / Cloudflare
 ```
 
@@ -305,9 +384,10 @@ v2 Features (After Research Paper Submission)
 | MongoDB + Mongoose      | ✅      | ✅                          |
 | NextAuth.js             | ✅      | ✅                          |
 | Email OTP (Nodemailer)  | ✅      | ✅                          |
-| ImageKit CDN            | ✅      | ✅ (partial)                |
+| ImageKit CDN            | ✅      | ✅                          |
+| Pinata IPFS (JSON pins) | ✅      | ✅ (metadata audit trail)   |
 | Biometric (simulated)   | ✅      | ✅ (simulated)              |
-| IPFS                    | ✅      | ❌                          |
+| IPFS candidate photos   | 🔮 v2   | ❌ (ImageKit used instead)  |
 | MetaMask / Wallet       | ✅      | ⚠️ Replaced by relay        |
 | Aadhaar API             | ✅      | ❌ Dropped                  |
 | Twilio OTP              | ✅      | ❌ Using Nodemailer instead |
@@ -319,12 +399,12 @@ v2 Features (After Research Paper Submission)
 
 ## Summary
 
-> The core voting pipeline is **~75% complete**.
-> Authentication → Org setup → Election creation → Candidate/voter management → Guardian approval → OTP voting → Analytics is all built.
-> The single most critical missing piece is the **relay vote API route** that actually submits votes to the blockchain.
-> Once that and the public-facing pages are done, the project is **MVP-ready for research submission**.
+> The project is **MVP-complete (~95%)** for research submission.
+> Full pipeline works: org signup → election creation → guardian approval → voter CSV → on-chain registration → OTP voting → receipt email → public results → vote verification → gas analytics → guardian governance.
+>
+> **Data persistence:** MongoDB Atlas + Pinata IPFS + ImageKit survive dev restarts. The **local Hardhat blockchain does not** — use `dev:next-only` with a persistent node, or deploy to Sepolia for durable on-chain state.
 
 ---
 
-_Report generated: July 2026_
+_Report updated: July 2026_
 _Project: Block Vote — Blockchain-Based Decentralized E-Voting System_
