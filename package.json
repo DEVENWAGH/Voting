@@ -13,7 +13,9 @@
     "compile": "hardhat compile",
     "hardhat:node": "hardhat node --hostname 0.0.0.0",
     "deploy:proxy": "hardhat run scripts/deployProxy.js --network localhost",
-    "deploy:sepolia": "hardhat run scripts/deployProxy.js --network sepolia"
+    "deploy:sepolia": "hardhat run scripts/deployProxy.js --network sepolia",
+    "deploy:v2-local": "hardhat run scripts/deployV2Impl.js --network localhost",
+    "deploy:v2-sepolia": "hardhat run scripts/deployV2Impl.js --network sepolia"
   },
   "dependencies": {
     "@tailwindcss/postcss": "^4.1.11",

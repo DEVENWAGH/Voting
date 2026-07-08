@@ -363,19 +363,8 @@ function GasTab() {
 
   useEffect(() => { load(); }, [load]);
 
-  const triggerFunding = async () => {
-    setFunding(true);
-    setMsg(null);
-    try {
-      const r = await fetch('/api/admin/gas/fund', { method: 'POST' });
-      const d = await r.json();
-      if (!r.ok) throw new Error(d.error);
-      setMsg({ type: 'success', text: d.message || 'Gas station refueled!' });
-      load();
-    } catch (e) {
-      setMsg({ type: 'error', text: e.message });
-    }
-    setFunding(false);
+  const triggerFunding = () => {
+    window.open('https://cloud.google.com/application/web3/faucet/ethereum/sepolia', '_blank');
   };
 
   const getGasStatus = (balanceStr) => {
@@ -471,15 +460,14 @@ function GasTab() {
           <div className="bg-canvas border border-hairline rounded-xl p-5 shadow-sm text-center space-y-4">
             <h4 className="text-sm font-semibold text-ink">Refuel System Gas Station</h4>
             <p className="text-body text-xs max-w-md mx-auto">
-              If reserves run low, request a mock refuel of Gas Station Node to maintain uninterrupted voter validation relays.
+              If reserves run low, request Sepolia testnet ETH from the official Google Cloud Web3 Faucet to maintain uninterrupted voter validation relays.
             </p>
             <button
               onClick={triggerFunding}
-              disabled={funding}
-              className="inline-flex items-center gap-2 bg-primary hover:bg-primary-active disabled:opacity-50 text-white text-xs font-semibold px-6 py-2.5 rounded-full cursor-pointer shadow-sm transition"
+              className="inline-flex items-center gap-2 bg-primary hover:bg-primary-active text-white text-xs font-semibold px-6 py-2.5 rounded-full cursor-pointer shadow-sm transition"
             >
-              {funding ? <Loader2 size={12} className="animate-spin" /> : <Fuel size={12} />}
-              <span>Refuel Gas Station</span>
+              <Fuel size={12} />
+              <span>Get Sepolia ETH (Faucet)</span>
             </button>
           </div>
         </div>
