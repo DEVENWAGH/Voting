@@ -78,7 +78,7 @@ export async function GET(req) {
         try {
           const parsed = iface.parseLog(log);
           if (parsed?.name === 'VoteCast') {
-            electionId = Number(parsed.args[0]);
+            electionId = parsed.args[0]; // bytes32 hex string
             candidateId = Number(parsed.args[1]);
             break;
           }

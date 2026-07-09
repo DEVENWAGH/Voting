@@ -7,7 +7,7 @@ import Candidate from '@/lib/models/Candidate';
 export async function GET(request, { params }) {
   try {
     await connectDB();
-    const id = Number(params.id);
+    const { id } = await params;
 
     const election = await Election.findOne({ electionId: id }).lean();
     if (!election)

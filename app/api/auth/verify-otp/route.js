@@ -13,10 +13,11 @@ import connectDB from "@/lib/db";
 import Voter from "@/lib/models/Voter";
 import EmailOTP from "@/lib/models/EmailOTP";
 import { preflightCheck } from "@/lib/preflightCache";
-import { relayCastVote } from "@/lib/relay";
+import { relayCastVote, relayRegisterVoter, isVoterRegisteredOnChain } from "@/lib/relay";
 import { sendVoteReceiptEmail } from "@/lib/mailer";
 import bcrypt from "bcryptjs";
 import { verifyBiometricToken } from "@/lib/biometric";
+import { computeNullifierHash } from "@/lib/voterIdentity";
 
 export async function POST(req) {
   try {
@@ -43,6 +44,8 @@ export async function POST(req) {
     await connectDB();
 
     const cleanEmail = email.toLowerCase().trim();
+    // electionId is now a bytes32 hex string
+    const eid = String(electionId);
 
     // ── 1. Verify OTP ─────────────────────────────────────────────────────────
     const record = await EmailOTP.findOne({
@@ -100,7 +103,7 @@ export async function POST(req) {
 
     const voter = await Voter.findOne({
       orgSlug: org.slug,
-      electionId: Number(electionId),
+      electionId: eid,
       email: cleanEmail,
     });
 
@@ -112,6 +115,52 @@ export async function POST(req) {
         },
         { status: 404 },
       );
+    }
+
+    // ── 2.1. Auto-recovery: if voter is 'pending', try to register on-chain now ──
+    let nullifierHash = voter.nullifierHash;
+
+    if (voter.status === 'pending' || !nullifierHash) {
+      // Voter was uploaded via CSV but never got registered on-chain (admin skipped bulk-register)
+      // Auto-register them now to fix the "not yet finalized" error
+      nullifierHash = computeNullifierHash(org.slug, cleanEmail);
+
+      try {
+        // Check if already registered on-chain
+        const alreadyOnChain = await isVoterRegisteredOnChain(eid, nullifierHash);
+        if (alreadyOnChain) {
+          await Voter.findByIdAndUpdate(voter._id, {
+            status: 'registered',
+            nullifierHash,
+            registeredAt: new Date(),
+            onChainTxHash: 'auto-linked',
+            rejectionReason: '',
+          });
+          voter.status = 'registered';
+          voter.nullifierHash = nullifierHash;
+        } else {
+          // Register on-chain via relay
+          const { txHash } = await relayRegisterVoter(eid, nullifierHash);
+          await Voter.findByIdAndUpdate(voter._id, {
+            status: 'registered',
+            nullifierHash,
+            registeredAt: new Date(),
+            onChainTxHash: txHash,
+            rejectionReason: '',
+          });
+          voter.status = 'registered';
+          voter.nullifierHash = nullifierHash;
+          console.log(`[verify-otp] Auto-registered voter ${cleanEmail} on-chain: ${txHash}`);
+        }
+      } catch (regErr) {
+        console.error(`[verify-otp] Auto-registration failed for ${cleanEmail}:`, regErr.message);
+        return NextResponse.json(
+          {
+            error: "Your voter registration could not be finalized on the blockchain. Please contact your election admin.",
+          },
+          { status: 403 },
+        );
+      }
     }
 
     if (voter.status !== "registered") {
@@ -133,10 +182,10 @@ export async function POST(req) {
       );
     }
 
-    // Use the nullifierHash stored during bulk-register — this is the exact bytes32
+    // Use the nullifierHash stored during registration — this is the exact bytes32
     // that was submitted to the contract. Never recompute it here to avoid any
     // formula mismatch between registration and voting.
-    const nullifierHash = voter.nullifierHash;
+    nullifierHash = voter.nullifierHash;
 
     // ── 2.5. Verify Biometric Token ──────────────────────────────────────────
     if (!biometricToken) {
@@ -155,14 +204,14 @@ export async function POST(req) {
     }
 
     // ── 3. Edge Pre-flight — fast double-vote guard (cache + chain) ───────────
-    const checkResult = await preflightCheck(nullifierHash, Number(electionId));
+    const checkResult = await preflightCheck(nullifierHash, eid);
     if (!checkResult.allowed) {
       return NextResponse.json({ error: checkResult.reason }, { status: 403 });
     }
 
     // ── 4. Cast Vote via Relay (logs to MongoDB VoteActivity automatically) ───
     const { txHash } = await relayCastVote(
-      Number(electionId),
+      eid,
       Number(candidateId),
       nullifierHash,
     );
@@ -171,10 +220,10 @@ export async function POST(req) {
     const Election = (await import("@/lib/models/Election")).default;
     const [candidate, election] = await Promise.all([
       Candidate.findOne({
-        electionId: Number(electionId),
+        electionId: eid,
         candidateId: Number(candidateId),
       }).lean(),
-      Election.findOne({ electionId: Number(electionId) }).lean(),
+      Election.findOne({ electionId: eid }).lean(),
     ]);
 
     const baseUrl =
@@ -186,7 +235,7 @@ export async function POST(req) {
     try {
       await sendVoteReceiptEmail(cleanEmail, {
         orgName: org.name || "Block Vote",
-        electionTitle: election?.title || `Election #${electionId}`,
+        electionTitle: election?.title || `Election #${eid.slice(0, 10)}`,
         candidateName: candidate?.name || "your selected candidate",
         txHash,
         verifyUrl,
@@ -216,7 +265,7 @@ export async function POST(req) {
       userMessage = 'Your voter registration is not yet finalized on the blockchain. Please contact your election admin to complete on-chain registration.';
     } else if (reason.includes('already voted')) {
       userMessage = 'Your vote has already been recorded on the blockchain for this election.';
-    } else if (reason.includes('election not active') || reason.includes('not in voting phase')) {
+    } else if (reason.includes('election not active') || reason.includes('not in voting phase') || reason.includes('not voting phase')) {
       userMessage = 'This election is no longer accepting votes.';
     } else if (reason.includes('invalid candidate')) {
       userMessage = 'The selected candidate is not valid for this election.';

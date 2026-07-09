@@ -44,7 +44,7 @@ export async function POST(req) {
 
     const voter = await Voter.findOne({
       orgSlug: org.slug,
-      electionId: Number(electionId),
+      electionId: String(electionId),
       email: email.toLowerCase().trim(),
     });
 
@@ -58,36 +58,34 @@ export async function POST(req) {
       );
     }
 
-    if (voter.status !== "registered") {
+    if (voter.status === "rejected") {
       return NextResponse.json(
         {
           error:
-            "Voter registration has not been finalized on-chain yet. Please contact your organization admin.",
+            `Voter registration was rejected: ${voter.rejectionReason || 'unknown reason'}. Please contact your organization admin.`,
         },
         { status: 403 },
       );
     }
 
-    if (!voter.nullifierHash) {
-      return NextResponse.json(
-        {
-          error:
-            "Voter on-chain registration is incomplete. Please contact your admin to re-run bulk registration.",
-        },
-        { status: 403 },
-      );
+    let nullifierHash = voter.nullifierHash;
+
+    // For pending voters who haven't been registered on-chain yet,
+    // compute the nullifierHash so we can proceed. Auto-registration
+    // happens later in verify-otp.
+    if (!nullifierHash) {
+      const { computeNullifierHash } = await import("@/lib/voterIdentity");
+      nullifierHash = computeNullifierHash(org.slug, email.toLowerCase().trim());
     }
 
     const orgName = org.name || "Block Vote";
 
-    // Use the stored nullifierHash — this is the exact bytes32 submitted to the contract
-    // during bulk-register. Using it directly prevents any formula mismatch.
-    const nullifierHash = voter.nullifierHash;
-
-    // 4. Run Pre-flight duplicate check (Feature 2)
-    const checkResult = await preflightCheck(nullifierHash, Number(electionId));
-    if (!checkResult.allowed) {
-      return NextResponse.json({ error: checkResult.reason }, { status: 403 });
+    // Pre-flight duplicate check — skip for pending voters (they aren't registered yet)
+    if (voter.status === "registered") {
+      const checkResult = await preflightCheck(nullifierHash, String(electionId));
+      if (!checkResult.allowed) {
+        return NextResponse.json({ error: checkResult.reason }, { status: 403 });
+      }
     }
 
     // 5. Generate 6-digit OTP

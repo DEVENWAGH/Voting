@@ -148,7 +148,7 @@ export async function POST(req) {
       // but blocks voting twice within the same election.
       const voteQuery = { voterNullifier: { $exists: true, $ne: '' } };
       if (electionId !== undefined && electionId !== null && electionId !== '') {
-        voteQuery.electionId = Number(electionId);
+        voteQuery.electionId = String(electionId);
       }
 
       const votedNullifiers = await VoteActivity.distinct('voterNullifier', voteQuery);

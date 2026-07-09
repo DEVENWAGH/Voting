@@ -64,12 +64,12 @@ export async function POST(req) {
       );
     }
 
-    const eid = Number(electionId);
+    const eid = String(electionId);
     const cid = Number(candidateId);
 
-    if (isNaN(eid) || isNaN(cid)) {
+    if (isNaN(cid)) {
       return NextResponse.json(
-        { error: "electionId and candidateId must be numbers" },
+        { error: "candidateId must be a number" },
         { status: 400 },
       );
     }
@@ -207,10 +207,10 @@ export async function GET(req) {
     }
 
     // Check pre-flight cache first (fast path)
-    const preflight = await preflightCheck(nullifierHash, Number(electionId));
+    const preflight = await preflightCheck(nullifierHash, String(electionId));
 
     return NextResponse.json({
-      electionId: Number(electionId),
+      electionId: String(electionId),
       hasVoted: !preflight.allowed,
       reason: preflight.allowed ? null : preflight.reason,
     });

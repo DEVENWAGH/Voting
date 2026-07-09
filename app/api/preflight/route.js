@@ -29,7 +29,7 @@ export async function POST(request) {
       );
     }
 
-    const result = await preflightCheck(nullifierHash, Number(electionId));
+    const result = await preflightCheck(nullifierHash, String(electionId));
 
     return NextResponse.json(result, {
       status: result.allowed ? 200 : 403,

@@ -16,7 +16,7 @@ import { relayTransitionPhase } from '@/lib/relay';
 export async function POST(req, { params }) {
   try {
     const { slug, id } = await params;
-    const electionId = Number(id);
+    const electionId = id; // bytes32 hex string from URL param
     const { action } = await req.json();
 
     if (!action) return NextResponse.json({ error: 'action is required' }, { status: 400 });

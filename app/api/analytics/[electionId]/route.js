@@ -15,7 +15,7 @@ export async function GET(request, { params }) {
   try {
     await connectDB();
     const { electionId } = await params;
-    const eid = Number(electionId);
+    const eid = String(electionId);
 
     // 1. Hourly vote distribution (time-series data for chart)
     const hourlyDistribution = await VoteActivity.aggregate([

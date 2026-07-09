@@ -39,7 +39,7 @@ export async function GET(req, { params }) {
       const contract = await getReadContract();
       const raw = await contract.getAllElections();
       onChainElections = raw.map((e) => ({
-        id: Number(e.id),
+        id: e.id, // bytes32 hex string
         title: e.title,
         description: e.description,
         bannerUrl: e.bannerUrl,
@@ -119,29 +119,16 @@ export async function POST(req, { params }) {
     if (!org)
       return NextResponse.json({ error: "Org not found" }, { status: 404 });
 
-    // Check for duplicate election title within this org
-    try {
-      const contract = await getReadContract();
-      const existing = await contract.getAllElections();
-      const titleLower = title.trim().toLowerCase();
-      // Only check titles of elections belonging to this org
-      const dbElections = await Election.find({ orgSlug: slug }).lean();
-      const orgElectionIds = new Set(dbElections.map((e) => e.electionId));
-      const duplicate = existing.find(
-        (e) =>
-          orgElectionIds.has(Number(e.id)) &&
-          e.title.trim().toLowerCase() === titleLower,
+    // Check for duplicate election title within this org (MongoDB only — faster & simpler)
+    const existingByTitle = await Election.findOne({
+      orgSlug: slug,
+      title: { $regex: new RegExp(`^${title.trim()}$`, 'i') },
+    }).lean();
+    if (existingByTitle) {
+      return NextResponse.json(
+        { error: `An election named "${title}" already exists for this organization` },
+        { status: 409 },
       );
-      if (duplicate) {
-        return NextResponse.json(
-          {
-            error: `An election named "${title}" already exists for this organization`,
-          },
-          { status: 409 },
-        );
-      }
-    } catch {
-      // Contract may not be available yet — skip duplicate check
     }
 
     let start = Math.floor(new Date(startTime).getTime() / 1000);
@@ -193,8 +180,8 @@ export async function POST(req, { params }) {
       );
     }
 
-    // Create election on-chain via relay
-    const { txHash, blockNumber } = await relayCreateElection(
+    // Create election on-chain via relay — returns the unique bytes32 electionId from event
+    const { txHash, blockNumber, electionId: newElectionId } = await relayCreateElection(
       title,
       description,
       bannerUrl,
@@ -203,41 +190,34 @@ export async function POST(req, { params }) {
       slug,
     );
 
-    // Get the newly-created election ID from the contract
-    let newElectionId = null;
-    try {
-      const contract = await getReadContract();
-      const count = Number(await contract.electionCount());
-      newElectionId = count - 1; // elections are 0-indexed, count is incremented after creation
-    } catch (e) {
-      console.warn(
-        "[org/elections POST] Could not read new election ID:",
-        e.message,
+    if (!newElectionId) {
+      console.error("[org/elections POST] Could not extract election ID from on-chain event");
+      return NextResponse.json(
+        { error: "Election created on-chain but could not read election ID from event." },
+        { status: 500 },
       );
     }
 
     // Store in MongoDB with org scoping — this is what makes elections per-org
-    if (newElectionId !== null) {
-      await Election.findOneAndUpdate(
-        { electionId: newElectionId },
-        {
-          electionId: newElectionId,
-          orgSlug: slug,
-          orgId: org._id,
-          title,
-          description,
-          startTime: new Date(start * 1000),
-          endTime: new Date(end * 1000),
-          phase: 0,
-          txHash,
-          blockNumber,
-          ipfsCid,
-          guardianApproved: false,
-          pendingApproval: false,
-        },
-        { upsert: true, new: true },
-      );
-    }
+    await Election.findOneAndUpdate(
+      { electionId: newElectionId },
+      {
+        electionId: newElectionId,
+        orgSlug: slug,
+        orgId: org._id,
+        title,
+        description,
+        startTime: new Date(start * 1000),
+        endTime: new Date(end * 1000),
+        phase: 0,
+        txHash,
+        blockNumber,
+        ipfsCid,
+        guardianApproved: false,
+        pendingApproval: false,
+      },
+      { upsert: true, new: true },
+    );
 
     return NextResponse.json(
       {

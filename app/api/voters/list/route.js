@@ -25,7 +25,7 @@ export async function GET(req) {
     if (electionIdRaw == null || electionIdRaw === '') {
       return NextResponse.json({ error: 'electionId is required' }, { status: 400 });
     }
-    const electionId = Number(electionIdRaw);
+    const electionId = String(electionIdRaw).trim();
 
     await connectDB();
 

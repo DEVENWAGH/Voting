@@ -27,7 +27,7 @@ async function getReadContract() {
 export async function GET(req, { params }) {
   try {
     const { slug, id } = await params;
-    const electionId = Number(id);
+    const electionId = id; // bytes32 hex string from URL param
 
     await connectDB();
     const org = await Organization.findOne({ slug });
@@ -69,7 +69,7 @@ export async function GET(req, { params }) {
 export async function POST(req, { params }) {
   try {
     const { slug, id } = await params;
-    const electionId = Number(id);
+    const electionId = id; // bytes32 hex string from URL param
     const {
       name,
       party,

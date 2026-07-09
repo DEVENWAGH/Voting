@@ -9,7 +9,7 @@ export async function GET(request) {
     await connectDB();
     const { searchParams } = new URL(request.url);
     const filter = {};
-    if (searchParams.has('electionId')) filter.electionId = Number(searchParams.get('electionId'));
+    if (searchParams.has('electionId')) filter.electionId = searchParams.get('electionId');
     const limit = Math.min(Number(searchParams.get('limit') || 100), 500);
 
     const votes = await VoteActivity.find(filter)
@@ -32,7 +32,7 @@ export async function POST(request) {
     const vote = await VoteActivity.findOneAndUpdate(
       { txHash },
       {
-        electionId:  Number(electionId),
+        electionId:  String(electionId),
         candidateId: Number(candidateId),
         txHash,
         blockNumber,
@@ -43,7 +43,7 @@ export async function POST(request) {
 
     // Increment totalVotes on the parent election
     await Election.findOneAndUpdate(
-      { electionId: Number(electionId) },
+      { electionId: String(electionId) },
       { $inc: { totalVotes: 1 } }
     );
 

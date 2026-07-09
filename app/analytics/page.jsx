@@ -162,7 +162,7 @@ export default function AnalyticsDashboardPage() {
         <div className="flex flex-wrap items-center gap-3 w-full md:w-auto justify-end">
           <div className="flex items-center gap-1.5 bg-slate-900 border border-slate-800 rounded-xl px-2.5 py-1.5 text-xs text-slate-400">
             <Calendar size={13} className="text-indigo-400" />
-            <select value={selectedElectionId || ''} onChange={e => setSelectedElectionId(Number(e.target.value))}
+            <select value={selectedElectionId || ''} onChange={e => setSelectedElectionId(e.target.value)}
               className="bg-transparent border-none outline-none text-white font-semibold pr-4 cursor-pointer">
               {elections.map(el => (
                 <option key={el.electionId} value={el.electionId} className="bg-slate-950 text-white">

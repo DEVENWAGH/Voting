@@ -6,7 +6,7 @@ import VoteActivity from '@/lib/models/VoteActivity';
 export async function GET(request, { params }) {
   try {
     await connectDB();
-    const id = Number(params.id);
+    const { id } = await params;
     const { searchParams } = new URL(request.url);
     const limit = Math.min(Number(searchParams.get('limit') || 50), 200);
 

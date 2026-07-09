@@ -18,7 +18,7 @@ export async function GET(request) {
     if (orgSlug && electionId) {
       voter = await Voter.findOne({
         orgSlug,
-        electionId: Number(electionId),
+        electionId: String(electionId),
         email,
         status: 'registered',
       });

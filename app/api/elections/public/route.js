@@ -40,7 +40,7 @@ export async function GET() {
       const contract = await getReadContract();
       const raw = await contract.getAllElections();
       for (const e of raw) {
-        onChainMap[Number(e.id)] = {
+        onChainMap[e.id] = {
           phase: Number(e.phase),
           title: e.title,
           description: e.description,

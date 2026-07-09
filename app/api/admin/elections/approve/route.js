@@ -25,7 +25,7 @@ export async function POST(req) {
 
     await connectDB();
 
-    const electionDoc = await Election.findOne({ electionId: Number(electionId) });
+    const electionDoc = await Election.findOne({ electionId: String(electionId) });
     if (!electionDoc) {
       return NextResponse.json({ error: 'Election not found' }, { status: 404 });
     }
@@ -37,7 +37,7 @@ export async function POST(req) {
     if (action === 'reject') {
       // Guardian rejects — reset the pending flag, stays in Registration
       await Election.findOneAndUpdate(
-        { electionId: Number(electionId) },
+        { electionId: String(electionId) },
         { pendingApproval: false }
       );
       return NextResponse.json({
@@ -48,11 +48,11 @@ export async function POST(req) {
 
     // ACTION: approve
     // Transition on-chain: Registration(0) → Voting(1)
-    const { txHash } = await relayTransitionPhase(Number(electionId), 1, electionDoc.orgSlug);
+    const { txHash } = await relayTransitionPhase(String(electionId), 1, electionDoc.orgSlug);
 
     // Update MongoDB
     await Election.findOneAndUpdate(
-      { electionId: Number(electionId) },
+      { electionId: String(electionId) },
       {
         phase:              1,
         pendingApproval:    false,

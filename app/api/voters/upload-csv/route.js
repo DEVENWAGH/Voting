@@ -2,6 +2,8 @@
  * POST /api/voters/upload-csv
  * Accepts multipart CSV file, validates, upserts voters into MongoDB,
  * then pins an anonymised voter roster (names + emails) to IPFS for audit trail.
+ * After upsert, automatically registers all pending voters on-chain via relay
+ * (no separate bulk-register step needed).
  *
  * Expected CSV columns: name, email, phone, gender, age
  * Required formData fields: file, orgSlug (and optionally orgId), electionId
@@ -12,6 +14,8 @@ import connectDB from "@/lib/db";
 import Voter from "@/lib/models/Voter";
 import Organization from "@/lib/models/Organization";
 import { pinJSON, getIPFSUrl } from "@/lib/ipfs";
+import { relayRegisterVoter, resetRelayNonce, isVoterRegisteredOnChain } from "@/lib/relay";
+import { computeNullifierHash, isAlreadyRegisteredError } from "@/lib/voterIdentity";
 
 const MAX_FILE_SIZE = 5 * 1024 * 1024; // 5 MB
 const MAX_ROWS = 10_000;
@@ -61,13 +65,8 @@ export async function POST(req) {
         { status: 400 },
       );
     }
-    const electionId = Number(electionIdRaw);
-    if (isNaN(electionId)) {
-      return NextResponse.json(
-        { error: "electionId must be a number" },
-        { status: 400 },
-      );
-    }
+    // electionId is now a bytes32 hex string (e.g. "0xabc123...")
+    const electionId = String(electionIdRaw).trim();
 
     // Resolve org by slug first, fall back to orgId
     const org = orgSlug
@@ -230,10 +229,10 @@ export async function POST(req) {
           voterEmails: validVoters.map((v) => v.email),
           uploadedAt: new Date().toISOString(),
         },
-        `voter-roster-${resolvedSlug}-election${electionId}-${Date.now()}`,
+        `voter-roster-${resolvedSlug}-${electionId.slice(0, 10)}-${Date.now()}`,
         {
           orgSlug: resolvedSlug,
-          electionId: String(electionId),
+          electionId,
           type: "voter-roster",
         },
       );
@@ -243,6 +242,78 @@ export async function POST(req) {
         "[upload-csv] IPFS pin failed (non-fatal):",
         ipfsErr.message,
       );
+    }
+
+    // ── Auto-register all pending voters on-chain ─────────────────────────────
+    // This eliminates the separate "bulk register" step that was causing the
+    // "not yet finalized on the blockchain" error when admins forgot to run it.
+    let registered = 0;
+    let linked = 0;
+    let regFailed = 0;
+    const regErrors = [];
+
+    const pendingVoters = await Voter.find({
+      orgSlug: resolvedSlug,
+      electionId,
+      status: 'pending',
+    });
+
+    if (pendingVoters.length > 0) {
+      resetRelayNonce();
+
+      for (const voter of pendingVoters) {
+        const label = voter.memberId || voter.email;
+        const nullifierHash = computeNullifierHash(resolvedSlug, voter.email);
+
+        try {
+          // Check if already registered on-chain for this election
+          try {
+            if (await isVoterRegisteredOnChain(electionId, nullifierHash)) {
+              await Voter.findByIdAndUpdate(voter._id, {
+                status: 'registered',
+                nullifierHash,
+                registeredAt: new Date(),
+                onChainTxHash: 'linked-existing',
+                rejectionReason: '',
+              });
+              linked++;
+              continue;
+            }
+          } catch (checkErr) {
+            console.warn(`[upload-csv] on-chain check failed for ${label}:`, checkErr.message);
+          }
+
+          const { txHash } = await relayRegisterVoter(electionId, nullifierHash);
+          await Voter.findByIdAndUpdate(voter._id, {
+            status: 'registered',
+            nullifierHash,
+            registeredAt: new Date(),
+            onChainTxHash: txHash,
+            rejectionReason: '',
+          });
+          registered++;
+        } catch (regErr) {
+          if (isAlreadyRegisteredError(regErr)) {
+            await Voter.findByIdAndUpdate(voter._id, {
+              status: 'registered',
+              nullifierHash,
+              registeredAt: new Date(),
+              onChainTxHash: 'linked-existing',
+              rejectionReason: '',
+            });
+            linked++;
+          } else {
+            console.error(`[upload-csv] auto-register failed for ${label}:`, regErr.message);
+            await Voter.findByIdAndUpdate(voter._id, {
+              status: 'rejected',
+              nullifierHash,
+              rejectionReason: regErr.message,
+            });
+            regErrors.push(label);
+            regFailed++;
+          }
+        }
+      }
     }
 
     return NextResponse.json({
@@ -257,6 +328,13 @@ export async function POST(req) {
       hasMoreErrors: errors.length > 50,
       ipfsCid,
       ipfsUrl: getIPFSUrl(ipfsCid),
+      // Auto-registration results
+      registration: {
+        registered,
+        linked,
+        failed: regFailed,
+        failedVoters: regErrors,
+      },
     });
   } catch (err) {
     console.error("[upload-csv] FATAL:", err);

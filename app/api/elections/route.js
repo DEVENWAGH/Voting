@@ -10,7 +10,7 @@ export async function GET(request) {
     const filter = {};
     if (searchParams.has('phase')) filter.phase = Number(searchParams.get('phase'));
 
-    const elections = await Election.find(filter).sort({ electionId: 1 }).lean();
+    const elections = await Election.find(filter).sort({ createdAt: -1 }).lean();
     return NextResponse.json({ success: true, count: elections.length, data: elections });
   } catch (err) {
     return NextResponse.json({ success: false, error: err.message }, { status: 500 });
@@ -25,9 +25,9 @@ export async function POST(request) {
     const { electionId, title, description, startTime, endTime, txHash, blockNumber } = body;
 
     const election = await Election.findOneAndUpdate(
-      { electionId: Number(electionId) },
+      { electionId: String(electionId) },
       {
-        electionId: Number(electionId),
+        electionId: String(electionId),
         title,
         description,
         startTime: new Date(Number(startTime) * 1000),

@@ -14,7 +14,7 @@ export async function GET(request) {
       );
 
     const candidates = await Candidate.find({
-      electionId: Number(searchParams.get('electionId')),
+      electionId: searchParams.get('electionId'),
     })
       .sort({ candidateId: 1 })
       .lean();
@@ -33,8 +33,8 @@ export async function POST(request) {
       await request.json();
 
     const candidate = await Candidate.findOneAndUpdate(
-      { electionId: Number(electionId), candidateId: Number(candidateId) },
-      { electionId: Number(electionId), candidateId: Number(candidateId), name, party, symbol, manifesto, txHash, blockNumber },
+      { electionId: String(electionId), candidateId: Number(candidateId) },
+      { electionId: String(electionId), candidateId: Number(candidateId), name, party, symbol, manifesto, txHash, blockNumber },
       { upsert: true, new: true }
     );
 
@@ -51,7 +51,7 @@ export async function PATCH(request) {
     const { electionId, candidateId } = await request.json();
 
     const candidate = await Candidate.findOneAndUpdate(
-      { electionId: Number(electionId), candidateId: Number(candidateId) },
+      { electionId: String(electionId), candidateId: Number(candidateId) },
       { $inc: { voteCount: 1 } },
       { new: true }
     );

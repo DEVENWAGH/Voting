@@ -3,7 +3,10 @@
  * Registers all pending voters for an election on-chain via relay.
  * Body: { orgSlug, electionId }
  *
- * GET  /api/voters/bulk-register?orgSlug=xxx&electionId=0  — check pending count
+ * GET  /api/voters/bulk-register?orgSlug=xxx&electionId=0xabc...  — check pending count
+ *
+ * NOTE: Auto-registration now happens during CSV upload. This endpoint
+ * serves as a manual fallback/retry if some voters failed during upload.
  */
 import { NextResponse } from 'next/server';
 import connectDB from '@/lib/db';
@@ -33,7 +36,7 @@ export async function POST(req) {
 
     await connectDB();
 
-    const eid = Number(electionId);
+    const eid = String(electionId);
     // Include voters previously rejected only because they were already on-chain from another election
     const votersToRegister = await Voter.find({
       orgSlug,
@@ -60,9 +63,9 @@ export async function POST(req) {
       let success = false;
       const nullifierHash = computeNullifierHash(orgSlug, voter.email);
 
-      // Org-wide on-chain registration — skip tx if already registered from a prior election
+      // Per-election on-chain registration — skip tx if already registered for this election
       try {
-        if (await isVoterRegisteredOnChain(nullifierHash)) {
+        if (await isVoterRegisteredOnChain(eid, nullifierHash)) {
           await linkExistingVoter(voter, nullifierHash);
           linked++;
           continue;
@@ -74,7 +77,7 @@ export async function POST(req) {
       // Retry up to 3 times to handle nonce desync with Hardhat automining
       for (let attempt = 0; attempt < 3 && !success; attempt++) {
         try {
-          const { txHash } = await relayRegisterVoter(nullifierHash);
+          const { txHash } = await relayRegisterVoter(eid, nullifierHash);
 
           await Voter.findByIdAndUpdate(voter._id, {
             status: 'registered',
@@ -92,7 +95,7 @@ export async function POST(req) {
             resetRelayNonce();
             continue;
           }
-          // On-chain identity is org-wide — voter may already be registered from another election
+          // Voter may already be registered for this election
           if (isAlreadyRegisteredError(err)) {
             await linkExistingVoter(voter, nullifierHash);
             linked++;
@@ -101,7 +104,7 @@ export async function POST(req) {
           }
           // Sepolia often omits revert reason — verify on-chain before marking failed
           try {
-            if (await isVoterRegisteredOnChain(nullifierHash)) {
+            if (await isVoterRegisteredOnChain(eid, nullifierHash)) {
               await linkExistingVoter(voter, nullifierHash);
               linked++;
               success = true;
@@ -142,7 +145,7 @@ export async function POST(req) {
       failed,
       failedVoters,
       message: linked > 0
-        ? `${registered} newly registered, ${linked} linked from prior org registration (no extra gas).`
+        ? `${registered} newly registered, ${linked} linked from prior registration (no extra gas).`
         : undefined,
     });
 
@@ -152,7 +155,7 @@ export async function POST(req) {
   }
 }
 
-/** GET /api/voters/bulk-register?orgSlug=xxx&electionId=0 — check pending count */
+/** GET /api/voters/bulk-register?orgSlug=xxx&electionId=0xabc... — check pending count */
 export async function GET(req) {
   try {
     const { searchParams } = new URL(req.url);
@@ -161,7 +164,7 @@ export async function GET(req) {
     if (!orgSlug)    return NextResponse.json({ error: 'orgSlug required' }, { status: 400 });
     if (electionId == null) return NextResponse.json({ error: 'electionId required' }, { status: 400 });
 
-    const eid = Number(electionId);
+    const eid = String(electionId);
     await connectDB();
     const pending    = await Voter.countDocuments({ orgSlug, electionId: eid, status: 'pending' });
     const registered = await Voter.countDocuments({ orgSlug, electionId: eid, status: 'registered' });

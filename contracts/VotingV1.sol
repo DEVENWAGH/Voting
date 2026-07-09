@@ -11,6 +11,8 @@ import "@openzeppelin/contracts-upgradeable/proxy/utils/UUPSUpgradeable.sol";
  *         - 3-guardian, 2-of-3 multi-sig controls upgrades
  *         - Voter identity = nullifier hash (keccak256 of orgId+memberId+secret)
  *         - No PII stored on-chain
+ *         - Election IDs are unique keccak256 hashes (no sequential counter)
+ *         - Voter registration is PER-ELECTION (same voter in multiple elections)
  */
 contract VotingV1 is Initializable, UUPSUpgradeable {
     // ─── Enums ────────────────────────────────────────────────────────────────
@@ -18,7 +20,7 @@ contract VotingV1 is Initializable, UUPSUpgradeable {
 
     // ─── Structs ──────────────────────────────────────────────────────────────
     struct Election {
-        uint256 id;
+        bytes32 id;             // unique keccak256 hash
         string  title;
         string  description;
         string  bannerUrl;     // ImageKit CDN URL
@@ -51,28 +53,35 @@ contract VotingV1 is Initializable, UUPSUpgradeable {
 
     // ─── State ────────────────────────────────────────────────────────────────
     address public relayWallet;             // platform gas-station wallet
-    uint256 public electionCount;
 
     address[3] public guardians;            // fixed 3-guardian set
     uint256 public proposalCount;
 
-    mapping(uint256 => Election)                              public elections;
-    mapping(uint256 => mapping(uint256 => Candidate))         public candidates;
-    mapping(uint256 => uint256)                               public electionCandidateCount;
+    // Elections stored by unique bytes32 ID (not sequential index)
+    mapping(bytes32 => Election)                              public elections;
+    mapping(bytes32 => mapping(uint256 => Candidate))         public candidates;
+    mapping(bytes32 => uint256)                               public electionCandidateCount;
 
-    // nullifierHash => has voted in election
-    mapping(bytes32 => mapping(uint256 => bool))              public hasVoted;
-    // nullifierHash => is registered
-    mapping(bytes32 => bool)                                  public isRegisteredVoter;
+    // Enumerable list of all election IDs (for getAllElections)
+    bytes32[] public electionIds;
+
+    // Per-election voter registration: electionId => nullifierHash => is registered
+    mapping(bytes32 => mapping(bytes32 => bool))              public isRegisteredVoter;
+
+    // Per-election vote tracking: nullifierHash => electionId => has voted
+    mapping(bytes32 => mapping(bytes32 => bool))              public hasVoted;
 
     mapping(uint256 => UpgradeProposal)                       public upgradeProposals;
 
+    // Legacy field kept for storage layout compatibility (unused)
+    uint256 public electionCount;
+
     // ─── Events ───────────────────────────────────────────────────────────────
-    event ElectionCreated(uint256 indexed electionId, string title, uint256 startTime, uint256 endTime);
-    event CandidateAdded(uint256 indexed electionId, uint256 indexed candidateId, string name);
-    event VoterRegistered(bytes32 indexed nullifierHash);
-    event VoteCast(uint256 indexed electionId, uint256 indexed candidateId); // no voter identity
-    event PhaseChanged(uint256 indexed electionId, ElectionPhase newPhase);
+    event ElectionCreated(bytes32 indexed electionId, string title, uint256 startTime, uint256 endTime);
+    event CandidateAdded(bytes32 indexed electionId, uint256 indexed candidateId, string name);
+    event VoterRegistered(bytes32 indexed electionId, bytes32 indexed nullifierHash);
+    event VoteCast(bytes32 indexed electionId, uint256 indexed candidateId); // no voter identity
+    event PhaseChanged(bytes32 indexed electionId, ElectionPhase newPhase);
     event UpgradeProposed(uint256 indexed proposalId, address newImplementation, address proposedBy);
     event UpgradeApproved(uint256 indexed proposalId, address approvedBy, uint256 approvalCount);
     event UpgradeExecuted(uint256 indexed proposalId, address newImplementation);
@@ -88,7 +97,7 @@ contract VotingV1 is Initializable, UUPSUpgradeable {
         _;
     }
 
-    modifier electionExists(uint256 _id) {
+    modifier electionExists(bytes32 _id) {
         require(elections[_id].exists, "VotingV1: election does not exist");
         _;
     }
@@ -183,13 +192,24 @@ contract VotingV1 is Initializable, UUPSUpgradeable {
         string memory _bannerUrl,
         uint256 _startTime,
         uint256 _endTime
-    ) external onlyRelay returns (uint256) {
+    ) external onlyRelay returns (bytes32) {
         require(bytes(_title).length > 0,       "VotingV1: title empty");
         require(bytes(_description).length > 0, "VotingV1: description empty");
         require(_startTime > block.timestamp,   "VotingV1: start in past");
         require(_endTime > _startTime,          "VotingV1: end before start");
 
-        uint256 id = electionCount++;
+        // Generate unique election ID — never collides even across chain restarts
+        bytes32 id = keccak256(abi.encodePacked(
+            _title,
+            _startTime,
+            _endTime,
+            block.timestamp,
+            msg.sender,
+            electionIds.length
+        ));
+
+        require(!elections[id].exists, "VotingV1: election ID collision");
+
         elections[id] = Election({
             id: id,
             title: _title,
@@ -200,12 +220,16 @@ contract VotingV1 is Initializable, UUPSUpgradeable {
             phase: ElectionPhase.Registration,
             exists: true
         });
+
+        electionIds.push(id);
+        electionCount = electionIds.length; // keep legacy field in sync
+
         emit ElectionCreated(id, _title, _startTime, _endTime);
         return id;
     }
 
     function addCandidate(
-        uint256 _electionId,
+        bytes32 _electionId,
         string memory _name,
         string memory _party,
         string memory _symbol,
@@ -234,7 +258,7 @@ contract VotingV1 is Initializable, UUPSUpgradeable {
     }
 
     function transitionPhase(
-        uint256 _electionId,
+        bytes32 _electionId,
         ElectionPhase _newPhase
     ) external onlyRelay electionExists(_electionId) {
         Election storage e = elections[_electionId];
@@ -254,17 +278,20 @@ contract VotingV1 is Initializable, UUPSUpgradeable {
         emit PhaseChanged(_electionId, _newPhase);
     }
 
-    // ─── Voter Registration (relay only, no voter wallet needed) ──────────────
+    // ─── Voter Registration (relay only, PER-ELECTION) ───────────────────────
     /**
-     * @notice Register a voter using their nullifier hash.
-     *         nullifierHash = keccak256(abi.encodePacked(orgId, memberId, SERVER_IDENTITY_SECRET))
-     *         Computed server-side. No PII stored on-chain.
+     * @notice Register a voter for a specific election using their nullifier hash.
+     *         nullifierHash = keccak256(abi.encodePacked(orgId, email, SERVER_IDENTITY_SECRET))
+     *         The same voter can be registered in multiple elections independently.
      */
-    function registerVoterByRelay(bytes32 _nullifierHash) external onlyRelay {
-        require(_nullifierHash != bytes32(0),         "VotingV1: zero hash");
-        require(!isRegisteredVoter[_nullifierHash],   "VotingV1: already registered");
-        isRegisteredVoter[_nullifierHash] = true;
-        emit VoterRegistered(_nullifierHash);
+    function registerVoterByRelay(
+        bytes32 _electionId,
+        bytes32 _nullifierHash
+    ) external onlyRelay electionExists(_electionId) {
+        require(_nullifierHash != bytes32(0),                             "VotingV1: zero hash");
+        require(!isRegisteredVoter[_electionId][_nullifierHash],          "VotingV1: already registered");
+        isRegisteredVoter[_electionId][_nullifierHash] = true;
+        emit VoterRegistered(_electionId, _nullifierHash);
     }
 
     // ─── Gasless Vote Casting (relay only) ────────────────────────────────────
@@ -274,12 +301,12 @@ contract VotingV1 is Initializable, UUPSUpgradeable {
      *         voterNullifier links to registered voter without revealing identity.
      */
     function castVoteRelayed(
-        uint256 _electionId,
+        bytes32 _electionId,
         uint256 _candidateId,
         bytes32 _voterNullifier
     ) external onlyRelay electionExists(_electionId) {
-        require(isRegisteredVoter[_voterNullifier],          "VotingV1: voter not registered");
-        require(!hasVoted[_voterNullifier][_electionId],     "VotingV1: already voted");
+        require(isRegisteredVoter[_electionId][_voterNullifier],     "VotingV1: voter not registered");
+        require(!hasVoted[_voterNullifier][_electionId],             "VotingV1: already voted");
         require(
             elections[_electionId].phase == ElectionPhase.Voting,
             "VotingV1: not voting phase"
@@ -295,29 +322,45 @@ contract VotingV1 is Initializable, UUPSUpgradeable {
     }
 
     // ─── View Functions ───────────────────────────────────────────────────────
-    function getElection(uint256 _id) external view electionExists(_id) returns (Election memory) {
+    function getElection(bytes32 _id) external view electionExists(_id) returns (Election memory) {
         return elections[_id];
     }
 
+    function getElectionCount() external view returns (uint256) {
+        return electionIds.length;
+    }
+
+    function getElectionIdAtIndex(uint256 _index) external view returns (bytes32) {
+        require(_index < electionIds.length, "VotingV1: index out of bounds");
+        return electionIds[_index];
+    }
+
     function getAllElections() external view returns (Election[] memory) {
-        Election[] memory all = new Election[](electionCount);
-        for (uint256 i = 0; i < electionCount; i++) all[i] = elections[i];
+        uint256 count = electionIds.length;
+        Election[] memory all = new Election[](count);
+        for (uint256 i = 0; i < count; i++) {
+            all[i] = elections[electionIds[i]];
+        }
         return all;
     }
 
-    function getCandidates(uint256 _electionId) external view electionExists(_electionId) returns (Candidate[] memory) {
+    function getAllElectionIds() external view returns (bytes32[] memory) {
+        return electionIds;
+    }
+
+    function getCandidates(bytes32 _electionId) external view electionExists(_electionId) returns (Candidate[] memory) {
         uint256 count = electionCandidateCount[_electionId];
         Candidate[] memory list = new Candidate[](count);
         for (uint256 i = 0; i < count; i++) list[i] = candidates[_electionId][i];
         return list;
     }
 
-    function getElectionResults(uint256 _electionId) external view electionExists(_electionId) returns (Candidate[] memory) {
+    function getElectionResults(bytes32 _electionId) external view electionExists(_electionId) returns (Candidate[] memory) {
         require(elections[_electionId].phase == ElectionPhase.Completed, "VotingV1: not completed");
         return this.getCandidates(_electionId);
     }
 
-    function getWinner(uint256 _electionId) external view electionExists(_electionId) returns (Candidate memory) {
+    function getWinner(bytes32 _electionId) external view electionExists(_electionId) returns (Candidate memory) {
         require(elections[_electionId].phase == ElectionPhase.Completed, "VotingV1: not completed");
         uint256 count = electionCandidateCount[_electionId];
         require(count > 0, "VotingV1: no candidates");
@@ -333,8 +376,12 @@ contract VotingV1 is Initializable, UUPSUpgradeable {
         return candidates[_electionId][winId];
     }
 
-    function hasVoterVoted(bytes32 _nullifierHash, uint256 _electionId) external view returns (bool) {
+    function hasVoterVoted(bytes32 _nullifierHash, bytes32 _electionId) external view returns (bool) {
         return hasVoted[_nullifierHash][_electionId];
+    }
+
+    function isVoterRegisteredForElection(bytes32 _electionId, bytes32 _nullifierHash) external view returns (bool) {
+        return isRegisteredVoter[_electionId][_nullifierHash];
     }
 
     function getGuardians() external view returns (address[3] memory) {
