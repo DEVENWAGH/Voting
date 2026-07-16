@@ -54,7 +54,7 @@ export async function POST(req) {
     const org = await Organization.findByIdAndUpdate(
       record.orgId,
       { isEmailVerified: true },
-      { new: true }
+      { returnDocument: 'after' }
     );
 
     if (!org) {

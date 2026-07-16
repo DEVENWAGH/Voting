@@ -159,7 +159,7 @@ export async function POST(req) {
         provider,
         registeredAt: new Date(),
       },
-      { upsert: true, new: true }
+      { upsert: true, returnDocument: 'after' }
     );
 
     // Success -> Issue 60s JWT token for immediate redirect

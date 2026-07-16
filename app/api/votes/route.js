@@ -38,7 +38,7 @@ export async function POST(request) {
         blockNumber,
         timestamp: timestamp ? new Date(Number(timestamp) * 1000) : new Date(),
       },
-      { upsert: true, new: true }
+      { upsert: true, returnDocument: 'after' }
     );
 
     // Increment totalVotes on the parent election

@@ -35,7 +35,7 @@ export async function POST(request) {
     const candidate = await Candidate.findOneAndUpdate(
       { electionId: String(electionId), candidateId: Number(candidateId) },
       { electionId: String(electionId), candidateId: Number(candidateId), name, party, symbol, manifesto, txHash, blockNumber },
-      { upsert: true, new: true }
+      { upsert: true, returnDocument: 'after' }
     );
 
     return NextResponse.json({ success: true, data: candidate }, { status: 201 });
@@ -53,7 +53,7 @@ export async function PATCH(request) {
     const candidate = await Candidate.findOneAndUpdate(
       { electionId: String(electionId), candidateId: Number(candidateId) },
       { $inc: { voteCount: 1 } },
-      { new: true }
+      { returnDocument: 'after' }
     );
 
     if (!candidate)

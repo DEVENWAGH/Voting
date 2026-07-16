@@ -33,7 +33,7 @@ export async function PATCH(request, { params }) {
     const election = await Election.findOneAndUpdate(
       { electionId: id },
       { $set: body },
-      { new: true }
+      { returnDocument: 'after' }
     );
     if (!election)
       return NextResponse.json({ success: false, error: 'Election not found' }, { status: 404 });
