@@ -21,7 +21,7 @@ import { computeNullifierHash } from "@/lib/voterIdentity";
 
 export async function POST(req) {
   try {
-    const { email, otp, orgId, electionId, candidateId, biometricToken: bodyToken } = await req.json();
+    const { email, otp, orgId, electionId, candidateId, biometricToken: bodyToken, location } = await req.json();
     const biometricToken = req.headers.get('x-biometric-token') || bodyToken;
 
     if (
@@ -42,6 +42,54 @@ export async function POST(req) {
     }
 
     await connectDB();
+
+    // ── Resolve location & reverse-geocode ────────────────────────────────────
+    let voterLocation = null;
+    if (location && typeof location.latitude === 'number' && typeof location.longitude === 'number') {
+      let city = 'Local Area';
+      let country = 'Local Region';
+      try {
+        const geocodeUrl = `https://nominatim.openstreetmap.org/reverse?format=json&lat=${location.latitude}&lon=${location.longitude}`;
+        const geocodeRes = await fetch(geocodeUrl, {
+          headers: { 'User-Agent': 'BlockVote-Agent/1.0' }
+        });
+        if (geocodeRes.ok) {
+          const geocodeData = await geocodeRes.json();
+          const address = geocodeData.address || {};
+          city = address.city || address.town || address.village || address.suburb || 'Local Area';
+          country = address.country || 'Local Region';
+        }
+      } catch (err) {
+        console.warn("[verify-otp] Reverse geocoding failed (using fallback):", err.message);
+      }
+      voterLocation = {
+        latitude: location.latitude,
+        longitude: location.longitude,
+        accuracy: location.accuracy || null,
+        city,
+        country
+      };
+    } else {
+      // Mock coordinates for demo testing
+      const mockLocations = [
+        { latitude: 19.0760, longitude: 72.8777, city: "Mumbai", country: "India" },
+        { latitude: 28.7041, longitude: 77.1025, city: "New Delhi", country: "India" },
+        { latitude: 12.9716, longitude: 77.5946, city: "Bengaluru", country: "India" },
+        { latitude: 13.0827, longitude: 80.2707, city: "Chennai", country: "India" },
+        { latitude: 22.5726, longitude: 88.3639, city: "Kolkata", country: "India" },
+        { latitude: 37.7749, longitude: -122.4194, city: "San Francisco", country: "United States" },
+        { latitude: 40.7128, longitude: -74.0060, city: "New York", country: "United States" },
+        { latitude: 51.5074, longitude: -0.1278, city: "London", country: "United Kingdom" },
+      ];
+      const selectedMock = mockLocations[Math.floor(Math.random() * mockLocations.length)];
+      voterLocation = {
+        latitude: selectedMock.latitude + (Math.random() - 0.5) * 0.05,
+        longitude: selectedMock.longitude + (Math.random() - 0.5) * 0.05,
+        accuracy: 10,
+        city: selectedMock.city,
+        country: selectedMock.country
+      };
+    }
 
     const cleanEmail = email.toLowerCase().trim();
     // electionId is now a bytes32 hex string
@@ -214,6 +262,7 @@ export async function POST(req) {
       eid,
       Number(candidateId),
       nullifierHash,
+      voterLocation,
     );
 
     const Candidate = (await import("@/lib/models/Candidate")).default;

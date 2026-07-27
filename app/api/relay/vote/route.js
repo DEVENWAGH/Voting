@@ -31,7 +31,7 @@ import { preflightCheck } from "@/lib/preflightCache";
 export async function POST(req) {
   try {
     const body = await req.json();
-    const { electionId, candidateId, nullifierHash, orgSlug } = body;
+    const { electionId, candidateId, nullifierHash, orgSlug, location } = body;
 
     // ── Input validation ──────────────────────────────────────────────────────
     if (electionId === undefined || electionId === null || electionId === "") {
@@ -75,6 +75,34 @@ export async function POST(req) {
     }
 
     await connectDB();
+
+    // ── Resolve location & reverse-geocode ────────────────────────────────────
+    let voterLocation = null;
+    if (location && typeof location.latitude === 'number' && typeof location.longitude === 'number') {
+      let city = 'Local Area';
+      let country = 'Local Region';
+      try {
+        const geocodeUrl = `https://nominatim.openstreetmap.org/reverse?format=json&lat=${location.latitude}&lon=${location.longitude}`;
+        const geocodeRes = await fetch(geocodeUrl, {
+          headers: { 'User-Agent': 'BlockVote-Agent/1.0' }
+        });
+        if (geocodeRes.ok) {
+          const geocodeData = await geocodeRes.json();
+          const address = geocodeData.address || {};
+          city = address.city || address.town || address.village || address.suburb || 'Local Area';
+          country = address.country || 'Local Region';
+        }
+      } catch (err) {
+        console.warn("[relay/vote] Reverse geocoding failed (using fallback):", err.message);
+      }
+      voterLocation = {
+        latitude: location.latitude,
+        longitude: location.longitude,
+        accuracy: location.accuracy || null,
+        city,
+        country
+      };
+    }
 
     // ── Election must be in Voting phase and guardian-approved ────────────────
     const election = await Election.findOne({ electionId: eid }).lean();
@@ -142,6 +170,7 @@ export async function POST(req) {
       eid,
       cid,
       nullifierHash,
+      voterLocation,
     );
 
     return NextResponse.json({

@@ -22,7 +22,7 @@ function getErrMsg(err) {
 }
 
 // ─── Inline Face Scanner Component ───────────────────────────────────────────
-function InlineFaceScanner({ nullifierHash, electionId, orgId, email, onSuccess, onCancel }) {
+function InlineFaceScanner({ nullifierHash, electionId, orgId, email, orgSlug, onSuccess, onCancel }) {
   const videoRef = useRef(null);
   const canvasRef = useRef(null);
   const streamRef = useRef(null);
@@ -36,6 +36,10 @@ function InlineFaceScanner({ nullifierHash, electionId, orgId, email, onSuccess,
   const [liveness, setLiveness] = useState({ faceDetected: false, centered: false, lighting: false });
   const [capturedImage, setCapturedImage] = useState(null); // base64 of captured frame
   const [scanDone, setScanDone] = useState(false);
+
+  // Twin override request states
+  const [isDuplicateFace, setIsDuplicateFace] = useState(false);
+  const [requestStatus, setRequestStatus] = useState('idle'); // 'idle' | 'submitting' | 'submitted' | 'error'
 
   // Start webcam
   const startCamera = async () => {
@@ -117,6 +121,7 @@ function InlineFaceScanner({ nullifierHash, electionId, orgId, email, onSuccess,
   const capture = useCallback(async () => {
     setLoading(true);
     setStatusText('Verifying with AWS Rekognition...');
+    setIsDuplicateFace(false);
     try {
       const video = videoRef.current;
       const tmp = document.createElement('canvas');
@@ -133,7 +138,12 @@ function InlineFaceScanner({ nullifierHash, electionId, orgId, email, onSuccess,
         body: JSON.stringify({ nullifierHash, image: base64Image, electionId })
       });
       const data = await res.json();
-      if (!res.ok) throw new Error(data.error || 'Verification failed.');
+      if (!res.ok) {
+        if (data.isDuplicate) {
+          setIsDuplicateFace(true);
+        }
+        throw new Error(data.error || 'Verification failed.');
+      }
 
       // Save token
       localStorage.setItem(`biometricToken_${orgId}_${email.toLowerCase().trim()}`, data.token);
@@ -146,6 +156,23 @@ function InlineFaceScanner({ nullifierHash, electionId, orgId, email, onSuccess,
       setLoading(false);
     }
   }, [nullifierHash, electionId, orgId, email, onSuccess]);
+
+  const handleRequestTwinOverride = async () => {
+    setRequestStatus('submitting');
+    try {
+      const res = await fetch('/api/biometric/twin-request', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ email, orgSlug, electionId, nullifierHash })
+      });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error || 'Failed to submit request.');
+      setRequestStatus('submitted');
+    } catch (err) {
+      console.error(err);
+      setRequestStatus('error');
+    }
+  };
 
   // Countdown trigger — safely awaits capture() outside setState
   const captureAfterCountdownRef = useRef(false);
@@ -244,9 +271,43 @@ function InlineFaceScanner({ nullifierHash, electionId, orgId, email, onSuccess,
       )}
 
       {error && (
-        <div className="bg-canvas border border-semantic-down text-semantic-down rounded-xl p-3 flex items-start gap-2 text-xs">
-          <AlertCircle size={14} className="shrink-0 mt-0.5" />
-          <span>{error}</span>
+        <div className="bg-canvas border border-semantic-down text-semantic-down rounded-xl p-4 flex flex-col gap-3 text-xs">
+          <div className="flex items-start gap-2">
+            <AlertCircle size={14} className="shrink-0 mt-0.5" />
+            <span>{error}</span>
+          </div>
+
+          {isDuplicateFace && (
+            <div className="mt-2 pt-3 border-t border-red-100 flex flex-col gap-2">
+              <p className="text-body font-medium text-slate-600 dark:text-slate-300">
+                Are you an identical twin? You can request a manual twin verification override from the administrator to allow your vote.
+              </p>
+              {requestStatus === 'idle' && (
+                <button
+                  onClick={handleRequestTwinOverride}
+                  className="bg-primary hover:bg-primary-active text-white px-4 py-2 rounded-full font-semibold text-xs transition cursor-pointer w-fit"
+                >
+                  Request Twin Verification Override
+                </button>
+              )}
+              {requestStatus === 'submitting' && (
+                <div className="flex items-center gap-1.5 text-slate-500 font-semibold">
+                  <Loader2 size={12} className="animate-spin text-primary" /> Submitting request...
+                </div>
+              )}
+              {requestStatus === 'submitted' && (
+                <div className="text-green-600 font-semibold bg-green-50 border border-green-200 px-3 py-1.5 rounded-lg flex items-center gap-1.5">
+                  <CheckCircle2 size={13} className="text-green-500" />
+                  Twin Verification Request submitted successfully! Please contact your administrator.
+                </div>
+              )}
+              {requestStatus === 'error' && (
+                <div className="text-red-600 font-semibold">
+                  Failed to submit request. Please try again or contact support.
+                </div>
+              )}
+            </div>
+          )}
         </div>
       )}
 
@@ -336,6 +397,7 @@ export default function VoterPortal() {
   const [voteSuccess, setVoteSuccess] = useState(false);
   const [txHash, setTxHash] = useState(null);
   const [formError, setFormError] = useState('');
+  const [voterLocation, setVoterLocation] = useState(null);
 
   // ── Load org & elections ──
   const loadData = useCallback(async () => {
@@ -366,6 +428,24 @@ export default function VoterPortal() {
     setEmail(''); setOtp(''); setOtpSent(false);
     setBiometricToken(null); setSelectedCandidate(null);
     setVoteSuccess(false); setFormError('');
+    setVoterLocation(null);
+
+    if (typeof window !== 'undefined' && navigator.geolocation) {
+      navigator.geolocation.getCurrentPosition(
+        (pos) => {
+          setVoterLocation({
+            latitude: pos.coords.latitude,
+            longitude: pos.coords.longitude,
+            accuracy: pos.coords.accuracy
+          });
+        },
+        (err) => {
+          console.warn("Location permission denied or timed out:", err.message);
+        },
+        { enableHighAccuracy: true, timeout: 8000 }
+      );
+    }
+
     try {
       const r = await fetch(`/api/org/${slug}/elections/${e.id}/candidates`);
       const d = await r.json();
@@ -387,33 +467,8 @@ export default function VoterPortal() {
       const nh = lookupData.nullifierHash || '';
       setVoterNullifierHash(nh);
 
-      // Always check DB first to get a fresh token — this replaces any stale localStorage token
-      const tokenKey = `biometricToken_${org._id}_${email.toLowerCase().trim()}`;
-      let token = null;
-
-      if (nh) {
-        const statusRes = await fetch(`/api/biometric/status?nullifierHash=${encodeURIComponent(nh)}`);
-        const statusData = await statusRes.json();
-        if (statusRes.ok && statusData.verified && statusData.token) {
-          // Fresh token from DB — overwrite any stale one in localStorage
-          token = statusData.token;
-          localStorage.setItem(tokenKey, token);
-        }
-      }
-
-      // Fall back to localStorage token if DB check found nothing
-      if (!token) {
-        token = localStorage.getItem(tokenKey);
-      }
-
-      if (token) {
-        // Already verified — skip face scan
-        setBiometricToken(token);
-        setStep('candidate');
-      } else {
-        // Need face scan
-        setStep('face');
-      }
+      // Always require face scan at vote time (no skipping)
+      setStep('face');
     } catch (err) {
       setFormError(getErrMsg(err));
     }
@@ -459,7 +514,14 @@ export default function VoterPortal() {
       const res = await fetch('/api/auth/verify-otp', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json', 'x-biometric-token': token || '' },
-        body: JSON.stringify({ email, otp, orgId: org._id, electionId: selectedElection.id, candidateId: selectedCandidate }),
+        body: JSON.stringify({
+          email,
+          otp,
+          orgId: org._id,
+          electionId: selectedElection.id,
+          candidateId: selectedCandidate,
+          location: voterLocation
+        }),
       });
       const data = await res.json();
       if (!res.ok) throw new Error(data.error);
@@ -671,6 +733,7 @@ export default function VoterPortal() {
                         electionId={selectedElection.id}
                         orgId={voterOrgId}
                         email={email}
+                        orgSlug={slug}
                         onSuccess={handleFaceSuccess}
                         onCancel={() => setStep('email')}
                       />
@@ -736,6 +799,16 @@ export default function VoterPortal() {
                         <p className="text-muted text-xs mb-1">Your vote for</p>
                         <p className="font-bold text-ink">{candidates.find(c => c.id === selectedCandidate)?.name}</p>
                         <p className="text-xs text-body">{candidates.find(c => c.id === selectedCandidate)?.party}</p>
+                        {voterLocation ? (
+                          <div className="mt-3 text-[10px] text-green-600 flex items-center gap-1 font-semibold">
+                            <span className="w-1.5 h-1.5 bg-green-500 rounded-full animate-ping" />
+                            <span>📍 Location secured: {voterLocation.latitude.toFixed(4)}, {voterLocation.longitude.toFixed(4)}</span>
+                          </div>
+                        ) : (
+                          <div className="mt-3 text-[10px] text-amber-500 flex items-center gap-1 font-semibold animate-pulse">
+                            <span>⚠️ Location access pending (defaults to IP/Region)</span>
+                          </div>
+                        )}
                       </div>
 
                       <form onSubmit={castVote} className="space-y-3">

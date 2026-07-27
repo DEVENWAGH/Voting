@@ -217,6 +217,138 @@ function CandidatePanel({ slug, electionId }) {
   );
 }
 
+// ── Twin Overrides Panel ──────────────────────────────────────────────────────
+function TwinOverridesPanel({ slug, electionId }) {
+  const queryClient = useQueryClient();
+  const [notes, setNotes] = useState('');
+  const [processingId, setProcessingId] = useState(null);
+  const [msg, setMsg] = useState(null);
+
+  // Fetch twin override requests
+  const { data: requests = [], isLoading, refetch } = useQuery({
+    queryKey: ['twinRequests', slug, electionId],
+    queryFn: async () => {
+      const r = await fetch(`/api/admin/twin-requests?orgSlug=${slug}&electionId=${electionId}`);
+      const d = await r.json();
+      return d.requests || [];
+    },
+    enabled: !!slug && electionId != null,
+  });
+
+  const handleAction = async (nullifierHash, action) => {
+    setProcessingId(nullifierHash);
+    setMsg(null);
+    try {
+      const res = await fetch('/api/admin/twin-requests', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ nullifierHash, action, notes }),
+      });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error || 'Failed to update twin override.');
+      setMsg({ type: 'success', text: `Successfully ${action === 'approve' ? 'approved' : 'rejected'} twin override.` });
+      setNotes('');
+      refetch();
+    } catch (err) {
+      setMsg({ type: 'error', text: err.message });
+    } finally {
+      setProcessingId(null);
+    }
+  };
+
+  return (
+    <div className="space-y-4 pt-4 border-t border-hairline">
+      <div>
+        <h4 className="text-ink font-semibold flex items-center gap-2 text-sm">
+          <Shield size={15} className="text-primary" /> Twin Verification Overrides
+        </h4>
+        <p className="text-xs text-body mt-0.5">Manage identity overrides for identical twins sharing similar facial geometry.</p>
+      </div>
+
+      {msg && <Toast type={msg.type} msg={msg.text} />}
+
+      {isLoading ? (
+        <div className="flex justify-center py-4"><Loader2 className="animate-spin text-primary" size={20} /></div>
+      ) : requests.length === 0 ? (
+        <div className="text-center py-6 text-body text-xs border border-dashed border-hairline rounded-xl bg-canvas">
+          No twin override requests found for this election.
+        </div>
+      ) : (
+        <div className="overflow-x-auto rounded-xl border border-hairline bg-canvas shadow-sm">
+          <table className="w-full text-xs text-left">
+            <thead>
+              <tr className="bg-surface-soft border-b border-hairline text-body font-semibold">
+                <th className="px-4 py-3">Voter</th>
+                <th className="px-4 py-3">Matched Face Conflict</th>
+                <th className="px-4 py-3">Similarity</th>
+                <th className="px-4 py-3">Status</th>
+                <th className="px-4 py-3">Notes</th>
+                <th className="px-4 py-3 text-right">Actions</th>
+              </tr>
+            </thead>
+            <tbody className="divide-y divide-hairline">
+              {requests.map((r) => (
+                <tr key={r.nullifierHash} className="hover:bg-surface-soft/40 transition">
+                  <td className="px-4 py-3">
+                    <p className="font-bold text-ink">{r.name}</p>
+                    <p className="text-muted font-mono text-[10px]">{r.email}</p>
+                  </td>
+                  <td className="px-4 py-3">
+                    <p className="font-semibold text-ink">{r.twinMatchedName}</p>
+                    <p className="text-muted font-mono text-[10px]">{r.twinMatchedEmail}</p>
+                  </td>
+                  <td className="px-4 py-3 font-mono font-bold text-primary">{r.twinMatchSimilarity}%</td>
+                  <td className="px-4 py-3">
+                    <span className={`text-[10px] px-2 py-0.5 rounded-full border font-bold uppercase tracking-wider ${
+                      r.twinVerificationStatus === 'approved' ? 'bg-green-50 text-green-700 border-green-200' :
+                      r.twinVerificationStatus === 'rejected' ? 'bg-red-50 text-red-700 border-red-200' :
+                      'bg-amber-50 text-amber-700 border-amber-200'
+                    }`}>
+                      {r.twinVerificationStatus}
+                    </span>
+                  </td>
+                  <td className="px-4 py-3 text-body max-w-[150px] truncate" title={r.twinNotes}>{r.twinNotes || '—'}</td>
+                  <td className="px-4 py-3 text-right">
+                    <div className="flex items-center justify-end gap-2">
+                      {r.twinVerificationStatus !== 'approved' && (
+                        <button
+                          disabled={processingId === r.nullifierHash}
+                          onClick={() => handleAction(r.nullifierHash, 'approve')}
+                          className="bg-primary hover:bg-primary-active text-white px-3 py-1.5 rounded-full font-bold text-[10px] transition cursor-pointer disabled:opacity-50"
+                        >
+                          Approve
+                        </button>
+                      )}
+                      {r.twinVerificationStatus !== 'rejected' && (
+                        <button
+                          disabled={processingId === r.nullifierHash}
+                          onClick={() => handleAction(r.nullifierHash, 'reject')}
+                          className="bg-surface-strong hover:bg-hairline text-ink px-3 py-1.5 rounded-full font-bold text-[10px] border border-hairline transition cursor-pointer disabled:opacity-50"
+                        >
+                          Reject
+                        </button>
+                      )}
+                    </div>
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+          <div className="p-3 bg-surface-soft/40 border-t border-hairline flex gap-2">
+            <input
+              type="text"
+              placeholder="Add override review note before acting (optional)..."
+              value={notes}
+              onChange={(e) => setNotes(e.target.value)}
+              className="flex-1 bg-canvas border border-hairline focus:border-primary text-ink px-3 py-1.5 rounded-lg outline-none text-xs"
+            />
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
+
 // ── CSV Upload Panel ──────────────────────────────────────────────────────────
 function CsvUploadPanel({ orgSlug, orgId, electionId }) {
   const queryClient = useQueryClient();
@@ -709,6 +841,13 @@ function ElectionsTab({ slug, org }) {
                                 Copy Link
                               </button>
                             </div>
+                          </div>
+                        )}
+
+                        {/* Twin Overrides Panel (visible in Registration & Voting phases) */}
+                        {(isRegistration || isVoting) && (
+                          <div className="bg-canvas border border-hairline rounded-xl p-5 shadow-sm">
+                            <TwinOverridesPanel slug={slug} electionId={e.id} />
                           </div>
                         )}
                       </div>

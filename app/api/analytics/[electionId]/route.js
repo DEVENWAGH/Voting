@@ -10,6 +10,8 @@ import { NextResponse } from 'next/server';
 import connectDB from '@/lib/db';
 import VoteActivity from '@/lib/models/VoteActivity';
 import Election from '@/lib/models/Election';
+import Voter from '@/lib/models/Voter';
+import BiometricHash from '@/lib/models/BiometricHash';
 
 export async function GET(request, { params }) {
   try {
@@ -95,6 +97,112 @@ export async function GET(request, { params }) {
     });
     const votesPerMinute = (recentCount / 10).toFixed(2);
 
+    // 8. Demographics & Geography (Age groups, roster gender, Rekognition gender, locations)
+    const votes = await VoteActivity.find({ electionId: eid }).lean();
+    const nullifierHashes = votes.map(v => v.voterNullifier).filter(Boolean);
+
+    const voters = await Voter.find({ nullifierHash: { $in: nullifierHashes }, electionId: eid }).lean();
+    const biometrics = await BiometricHash.find({ nullifierHash: { $in: nullifierHashes } }).lean();
+
+    const voterMap = {};
+    for (const v of voters) {
+      voterMap[v.nullifierHash] = v;
+    }
+
+    const bioMap = {};
+    for (const b of biometrics) {
+      bioMap[b.nullifierHash] = b;
+    }
+
+    const ageGroups = {
+      '18-25': 0,
+      '26-35': 0,
+      '36-50': 0,
+      '50+': 0,
+      'Unknown': 0
+    };
+
+    const rosterGenders = {
+      'Male': 0,
+      'Female': 0,
+      'Other': 0,
+      'Unknown': 0
+    };
+
+    const rekognitionGenders = {
+      'Male': 0,
+      'Female': 0,
+      'Unknown': 0
+    };
+
+    let genderMatches = 0;
+    let genderMismatches = 0;
+    let genderCompareUnknowns = 0;
+
+    const locations = [];
+
+    for (const vote of votes) {
+      // Geolocation details
+      if (vote.voterLocation) {
+        locations.push({
+          latitude: vote.voterLocation.latitude,
+          longitude: vote.voterLocation.longitude,
+          city: vote.voterLocation.city || 'Local Area',
+          country: vote.voterLocation.country || 'Local Region',
+          timestamp: vote.timestamp
+        });
+      }
+
+      const voter = voterMap[vote.voterNullifier];
+      const bio = bioMap[vote.voterNullifier];
+
+      // Age groups
+      if (voter && voter.age) {
+        const age = voter.age;
+        if (age >= 18 && age <= 25) ageGroups['18-25']++;
+        else if (age >= 26 && age <= 35) ageGroups['26-35']++;
+        else if (age >= 36 && age <= 50) ageGroups['36-50']++;
+        else if (age > 50) ageGroups['50+']++;
+        else ageGroups['Unknown']++;
+      } else {
+        ageGroups['Unknown']++;
+      }
+
+      // Roster genders
+      let rGender = 'Unknown';
+      if (voter && voter.gender) {
+        const g = voter.gender.trim().toLowerCase();
+        if (g === 'male' || g === 'm') { rGender = 'Male'; rosterGenders['Male']++; }
+        else if (g === 'female' || g === 'f') { rGender = 'Female'; rosterGenders['Female']++; }
+        else if (g) { rGender = 'Other'; rosterGenders['Other']++; }
+        else { rosterGenders['Unknown']++; }
+      } else {
+        rosterGenders['Unknown']++;
+      }
+
+      // Rekognition genders
+      let awsGender = 'Unknown';
+      if (bio && bio.faceAttributes && bio.faceAttributes.gender) {
+        const g = bio.faceAttributes.gender.trim().toLowerCase();
+        if (g === 'male') { awsGender = 'Male'; rekognitionGenders['Male']++; }
+        else if (g === 'female') { awsGender = 'Female'; rekognitionGenders['Female']++; }
+        else { rekognitionGenders['Unknown']++; }
+      } else {
+        rekognitionGenders['Unknown']++;
+      }
+
+      // Gender Match checks
+      if (rGender !== 'Unknown' && awsGender !== 'Unknown') {
+        if (rGender.toLowerCase() === awsGender.toLowerCase()) {
+          genderMatches++;
+        } else {
+          genderMismatches++;
+        }
+      } else {
+        genderCompareUnknowns++;
+      }
+    }
+
     return NextResponse.json({
       success: true,
       data: {
@@ -122,6 +230,20 @@ export async function GET(request, { params }) {
           blockNumber: v.blockNumber,
           timestamp: v.timestamp,
         })),
+        demographics: {
+          ageGroups,
+          rosterGenders,
+          rekognitionGenders,
+          genderMatchStats: {
+            matches: genderMatches,
+            mismatches: genderMismatches,
+            unknowns: genderCompareUnknowns,
+            matchRate: (genderMatches + genderMismatches) > 0
+              ? Number(((genderMatches / (genderMatches + genderMismatches)) * 100).toFixed(1))
+              : 100
+          },
+          locations
+        }
       },
     });
   } catch (err) {

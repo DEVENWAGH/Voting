@@ -46,6 +46,8 @@ export async function POST(req) {
     let provider = 'local-canvas';
     let ipfsCid = '';
     let faceAttributes = null;
+    let faceId = '';
+    let twinVerificationStatus = 'none';
 
     if (image) {
       const rekognition = getRekognitionClient();
@@ -118,6 +120,59 @@ export async function POST(req) {
         );
       }
 
+      // Check duplicate face in collection
+      try {
+        const { searchFaceFromBase64, indexFaceFromBase64 } = await import('@/lib/aws');
+
+        const existingRecord = await BiometricHash.findOne({ nullifierHash });
+        const hasTwinBypass = existingRecord && (existingRecord.bypassDuplicateCheck || existingRecord.twinVerificationStatus === 'approved');
+
+        const matches = await searchFaceFromBase64(image, 5, 85);
+        const otherMatch = matches.find(m => m.nullifierHash !== nullifierHash);
+
+        if (otherMatch && !hasTwinBypass) {
+          let matchedEmail = '';
+          const matchedVoter = await Voter.findOne({ nullifierHash: otherMatch.nullifierHash });
+          if (matchedVoter) {
+            matchedEmail = matchedVoter.email;
+          }
+
+          // Save pending twin record
+          await BiometricHash.findOneAndUpdate(
+            { nullifierHash },
+            {
+              nullifierHash,
+              biometricHash: `pending-twin-override-for-${otherMatch.nullifierHash}`,
+              faceConfidence: confidence,
+              provider: 'aws-rekognition',
+              registeredAt: new Date(),
+              twinVerificationStatus: 'pending',
+              twinMatchedNullifier: otherMatch.nullifierHash,
+              twinMatchedEmail: matchedEmail,
+              twinMatchSimilarity: Math.round(otherMatch.similarity),
+              twinNotes: 'Automatically flagged: high similarity match with another registered face.',
+              faceAttributes,
+            },
+            { upsert: true }
+          );
+
+          return NextResponse.json({
+            error: 'DUPLICATE_FACE_DETECTED',
+            message: 'This face matches another registered voter. If you are an identical twin, please request a Twin Verification Override.',
+            similarity: Math.round(otherMatch.similarity),
+            matchedNullifier: otherMatch.nullifierHash
+          }, { status: 409 });
+        }
+
+        // Proceed to index face in AWS Collection
+        const indexRes = await indexFaceFromBase64(nullifierHash, image);
+        faceId = indexRes?.faceId || '';
+        twinVerificationStatus = hasTwinBypass ? 'approved' : 'none';
+
+      } catch (searchErr) {
+        console.error('[biometric/register] AWS Rekognition search/index error:', searchErr);
+      }
+
       // Pin face registration to IPFS
       try {
         const { pinJSON } = await import('@/lib/ipfs');
@@ -158,6 +213,8 @@ export async function POST(req) {
         faceConfidence: confidence,
         provider,
         registeredAt: new Date(),
+        faceId,
+        twinVerificationStatus,
       },
       { upsert: true, new: true }
     );

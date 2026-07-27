@@ -65,6 +65,7 @@ export default function HomePage() {
             <a href="#how-it-works" className="hover:text-ink transition">How it works</a>
             <Link href="/elections" className="hover:text-ink transition">Results</Link>
             <Link href="/verify" className="hover:text-ink transition">Verify Vote</Link>
+            <Link href="/rules" className="hover:text-ink transition">Rules & Security</Link>
           </div>
 
           <div className="flex items-center gap-3">
@@ -320,6 +321,7 @@ export default function HomePage() {
             <Link href="/elections" className="hover:text-ink transition">Public Results</Link>
             <Link href="/verify" className="hover:text-ink transition">Verify Ballots</Link>
             <Link href="/admin-auth" className="hover:text-ink transition">Guardian Portal</Link>
+            <Link href="/rules" className="hover:text-ink transition">Rules & Security</Link>
           </div>
 
           <div className="flex md:justify-end gap-4 text-xs text-muted">

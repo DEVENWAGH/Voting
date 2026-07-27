@@ -22,15 +22,14 @@ export async function GET(req) {
     const record = await BiometricHash.findOne({ nullifierHash });
 
     if (!record) {
-      return NextResponse.json({ verified: false });
+      return NextResponse.json({ verified: false, registered: false });
     }
 
-    // Voter already has a biometric profile — issue a fresh permanent token
-    const token = issueBiometricToken(nullifierHash);
-
     return NextResponse.json({
-      verified: true,
-      token,
+      registered: true,
+      verified: false, // Enforce face scanning every time they vote
+      twinVerificationStatus: record.twinVerificationStatus || 'none',
+      bypassDuplicateCheck: record.bypassDuplicateCheck || false,
       verificationCount: record.verificationCount,
       lastVerifiedAt: record.lastVerifiedAt,
       faceAttributes: record.faceAttributes,

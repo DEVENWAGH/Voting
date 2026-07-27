@@ -9,6 +9,7 @@ import {
   UserCheck, Trophy, BarChart3, Fuel, Plus, Play, Trash2, Database
 } from 'lucide-react';
 import ElectionResults from '@/components/ElectionResults';
+import VoterAnalytics from '@/components/VoterAnalytics';
 import ThemeToggle from '@/components/ThemeToggle';
 
 const APPROVAL_THRESHOLD = 2;
@@ -160,11 +161,12 @@ function ResultsTab({ slug }) {
   const [elections, setElections] = useState([]);
   const [loading, setLoading] = useState(true);
   const [selectedElection, setSelectedElection] = useState(null);
+  const [subTab, setSubTab] = useState('tally'); // 'tally' | 'demographics'
 
   const load = useCallback(async () => {
     setLoading(true);
     try {
-      const r = await fetch('/api/admin/elections?filter=completed');
+      const r = await fetch('/api/admin/elections?filter=all');
       const d = await r.json();
       setElections(d.elections || []);
     } catch {}
@@ -177,8 +179,8 @@ function ResultsTab({ slug }) {
     <div className="space-y-6">
       <div className="flex items-center justify-between border-b border-hairline pb-4">
         <div>
-          <h3 className="text-lg font-semibold text-ink">Completed Elections</h3>
-          <p className="text-xs text-body mt-0.5">Browse final outcomes stored on-chain.</p>
+          <h3 className="text-lg font-semibold text-ink">Elections Analytics</h3>
+          <p className="text-xs text-body mt-0.5">Browse real-time tallies, demographics, and geographical voter audits.</p>
         </div>
         <button onClick={load} className="flex items-center gap-1.5 text-xs text-body hover:text-ink border border-hairline px-3 py-1.5 rounded-full bg-canvas cursor-pointer">
           <RefreshCw size={12} /> Sync
@@ -191,35 +193,76 @@ function ResultsTab({ slug }) {
         <div className="text-center py-12 border border-dashed border-hairline rounded-xl bg-canvas">
           <Trophy size={36} className="text-muted mx-auto mb-3" />
           <p className="text-ink font-semibold">No records archived</p>
-          <p className="text-body text-xs mt-1">There are no completed elections registered on-chain.</p>
+          <p className="text-body text-xs mt-1">There are no elections registered on this platform.</p>
         </div>
       ) : (
-        <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-          <div className="space-y-2">
+        <div className="grid grid-cols-1 lg:grid-cols-12 gap-5 items-start">
+          <div className="lg:col-span-4 space-y-2 max-h-[500px] overflow-y-auto pr-1">
             {elections.map((e) => (
               <button
                 key={e._id || e.id}
-                onClick={() => setSelectedElection(e)}
+                onClick={() => { setSelectedElection(e); setSubTab('tally'); }}
                 className={`w-full text-left p-4 rounded-lg border transition ${
                   selectedElection?.id === e.id
                     ? 'border-primary bg-primary/5 shadow-sm'
                     : 'border-hairline bg-canvas hover:border-body'
                 }`}
               >
-                <h4 className="font-semibold text-ink text-sm leading-snug">{e.title}</h4>
-                <p className="text-body text-[11px] mt-0.5 truncate">{e.description}</p>
-                <p className="text-[10px] text-muted font-mono mt-1">ID: {e.id} · Org: {e.orgSlug}</p>
+                <div className="flex justify-between items-start gap-2">
+                  <h4 className="font-semibold text-ink text-sm leading-snug">{e.title}</h4>
+                  <span className={`text-[8px] uppercase font-bold tracking-wider px-2 py-0.5 rounded-full shrink-0 border ${
+                    e.phase === 1
+                      ? 'bg-green-50 text-green-700 border-green-200'
+                      : e.phase === 2
+                      ? 'bg-blue-50 text-blue-700 border-blue-200'
+                      : 'bg-amber-50 text-amber-700 border-amber-200'
+                  }`}>
+                    {e.phase === 1 ? 'Live' : e.phase === 2 ? 'Ended' : 'Setup'}
+                  </span>
+                </div>
+                <p className="text-body text-[11px] mt-1.5 truncate">{e.description}</p>
+                <p className="text-[10px] text-muted font-mono mt-1">ID: {e.id.slice(0, 15)}... · Org: {e.orgSlug}</p>
               </button>
             ))}
           </div>
 
-          <div className="bg-canvas border border-hairline rounded-xl p-5 shadow-sm">
+          <div className="lg:col-span-8 bg-canvas border border-hairline rounded-xl p-5 shadow-sm">
             {selectedElection ? (
-              <ElectionResults slug={selectedElection.orgSlug} electionId={selectedElection.id} electionTitle={selectedElection.title} compact />
+              <>
+                {/* Mini Sub-Tabs Selector */}
+                <div className="flex border-b border-hairline pb-2 mb-5 gap-6">
+                  <button
+                    onClick={() => setSubTab('tally')}
+                    className={`pb-2 text-xs font-bold uppercase tracking-wider transition-all border-b-2 cursor-pointer ${
+                      subTab === 'tally'
+                        ? 'border-primary text-primary'
+                        : 'border-transparent text-muted hover:text-ink'
+                    }`}
+                  >
+                    Official Tally
+                  </button>
+                  <button
+                    onClick={() => setSubTab('demographics')}
+                    className={`pb-2 text-xs font-bold uppercase tracking-wider transition-all border-b-2 cursor-pointer ${
+                      subTab === 'demographics'
+                        ? 'border-primary text-primary'
+                        : 'border-transparent text-muted hover:text-ink'
+                    }`}
+                  >
+                    Demographics & Geography
+                  </button>
+                </div>
+
+                {subTab === 'tally' ? (
+                  <ElectionResults slug={selectedElection.orgSlug} electionId={selectedElection.id} electionTitle={selectedElection.title} compact />
+                ) : (
+                  <VoterAnalytics slug={selectedElection.orgSlug} electionId={selectedElection.id} electionTitle={selectedElection.title} />
+                )}
+              </>
             ) : (
-              <div className="h-full flex flex-col justify-center items-center text-center py-12">
-                <BarChart3 size={32} className="text-muted mb-2 animate-pulse" />
-                <p className="text-body text-xs">Select an election from the list to display official tally charts.</p>
+              <div className="h-full flex flex-col justify-center items-center text-center py-16">
+                <BarChart3 size={36} className="text-muted mb-2 animate-pulse" />
+                <p className="text-body text-xs font-semibold">Select an election from the roster list to audit official tallies and geographic maps.</p>
               </div>
             )}
           </div>
