@@ -216,7 +216,7 @@ export async function POST(req, { params }) {
         guardianApproved: false,
         pendingApproval: false,
       },
-      { upsert: true, new: true },
+      { upsert: true, returnDocument: 'after' },
     );
 
     return NextResponse.json(

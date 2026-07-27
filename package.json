@@ -16,7 +16,9 @@
     "deploy:sepolia": "hardhat run scripts/deployProxy.js --network sepolia",
     "deploy:v2-local": "hardhat run scripts/deployV2Impl.js --network localhost",
     "deploy:v2-sepolia": "hardhat run scripts/deployV2Impl.js --network sepolia",
-    "vanish": "node scripts/vanish.js"
+    "vanish": "node scripts/vanish.js",
+    "db:start": "docker compose up -d",
+    "db:stop": "docker compose down"
   },
   "dependencies": {
     "@aws-sdk/client-rekognition": "^3.1081.0",
@@ -35,6 +37,7 @@
     "react": "^19.1.0",
     "react-dom": "^19.1.0",
     "react-dropzone": "^15.0.0",
+    "resend": "^6.17.2",
     "tailwindcss": "^4.1.11"
   },
   "devDependencies": {

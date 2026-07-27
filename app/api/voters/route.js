@@ -30,7 +30,7 @@ export async function POST(request) {
         txHash,
         blockNumber,
       },
-      { upsert: true, new: true }
+      { upsert: true, returnDocument: 'after' }
     );
     return NextResponse.json({ success: true, data: voter }, { status: 201 });
   } catch (err) {

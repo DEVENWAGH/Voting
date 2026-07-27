@@ -71,7 +71,7 @@ export async function POST(req) {
         isEmailVerified: false,
         isActive:        true,
       },
-      { upsert: true, new: true, setDefaultsOnInsert: true }
+      { upsert: true, returnDocument: 'after', setDefaultsOnInsert: true }
     );
 
     // Generate & store OTP (overwrite any existing for this email)
@@ -88,7 +88,7 @@ export async function POST(req) {
         used:      false,
         attempts:  0,
       },
-      { upsert: true, new: true }
+      { upsert: true, returnDocument: 'after' }
     );
 
     // Send OTP email
