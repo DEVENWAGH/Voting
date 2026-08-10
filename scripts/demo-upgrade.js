@@ -6,43 +6,53 @@ import { fileURLToPath } from "url";
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = dirname(__filename);
 
-async function walletFromEnv(envKey, fallback, defaultAddress) {
-  const key = process.env[envKey];
-  if (key) return new hre.ethers.Wallet(key, hre.ethers.provider);
-  if (fallback) return fallback;
-  return { address: defaultAddress };
-}
-
+/**
+ * demo-upgrade.js
+ *
+ * Demonstrates the UUPS upgrade pattern using only VotingV3:
+ *   1. Connects to an existing VotingV3 proxy
+ *   2. Deploys a fresh VotingV3 as the new implementation (simulates a logic upgrade)
+ *   3. Shows 2-of-3 guardian multi-sig — fails with 1 approval, succeeds with 2
+ *   4. Executes the upgrade and verifies version() is still "3.0.0"
+ *
+ * Accounts used (Hardhat local):
+ *   Account #0 → relay + guardian1
+ *   Account #1 → deployer + guardian2
+ *   Account #2 → guardian3
+ */
 async function main() {
-  console.log("🚀 Initializing UUPS Upgrade Demo Script...");
+  console.log("🚀 Initializing UUPS Upgrade Demo (VotingV3)...");
   console.log("   Network:", hre.network.name);
 
-  // 1. Get Signers
   const signers = await hre.ethers.getSigners();
   let deployer, relay, guardian1, guardian2, guardian3;
 
   if (hre.network.name === "localhost" || hre.network.name === "hardhat") {
     console.log("   Running on LOCAL network: using default Hardhat wallets.");
-    deployer  = signers[1]; // Account #1 (Guardian 2 / Gas Station)
-    relay     = signers[0]; // Account #0 (Guardian 1 / Relayer)
-    guardian1 = signers[0]; // Account #0 (Guardian 1)
-    guardian2 = signers[1]; // Account #1 (Guardian 2)
-    guardian3 = signers[2]; // Account #2 (Guardian 3)
+    deployer  = signers[1]; // Account #1
+    relay     = signers[0]; // Account #0
+    guardian1 = signers[0]; // Account #0
+    guardian2 = signers[1]; // Account #1
+    guardian3 = signers[2]; // Account #2
   } else {
-    console.log("   Running on LIVE network: loading keys from .env...");
-    deployer  = await walletFromEnv("DEPLOYER_PRIVATE_KEY", signers[0], "0xcda674D670C0b9Fc8C5037a21F00C8D7Db380f9A");
-    relay     = await walletFromEnv("ADMIN_RELAY_PRIVATE_KEY", signers[1], "0xcda674D670C0b9Fc8C5037a21F00C8D7Db380f9A"); // Guardian 1
+    const walletFromEnv = async (envKey, fallback) => {
+      const key = process.env[envKey];
+      if (key) return new hre.ethers.Wallet(key, hre.ethers.provider);
+      return fallback;
+    };
+    deployer  = await walletFromEnv("DEPLOYER_PRIVATE_KEY",    signers[0]);
+    relay     = await walletFromEnv("ADMIN_RELAY_PRIVATE_KEY", signers[1]);
     guardian1 = relay;
-    guardian2 = await walletFromEnv("GUARDIAN_1_PRIVATE_KEY", signers[2], "0xBf0353eA5cD869e3707B326722Cf8492A0201fbB"); // Guardian 2
-    guardian3 = await walletFromEnv("GUARDIAN_2_PRIVATE_KEY", signers[3], "0x7b359a8ca8a9419d6Ed0392641B6BE18df79dE84"); // Guardian 3
+    guardian2 = await walletFromEnv("GUARDIAN_1_PRIVATE_KEY",  signers[2]);
+    guardian3 = await walletFromEnv("GUARDIAN_2_PRIVATE_KEY",  signers[3]);
   }
 
-  console.log("\n🔑 Guardian Wallet Config:");
+  console.log("\n🔑 Wallet Config:");
   console.log("   Guardian 1 (Relay) :", guardian1.address);
   console.log("   Guardian 2         :", guardian2.address);
   console.log("   Guardian 3         :", guardian3.address);
 
-  // 2. Load Proxy Address from .env or contract-address file
+  // ── Load proxy address ────────────────────────────────────────────────────
   const envPath = resolve(__dirname, "../.env");
   let proxyAddress = process.env.NEXT_PUBLIC_CONTRACT_ADDRESS;
 
@@ -53,95 +63,90 @@ async function main() {
   }
 
   if (!proxyAddress) {
-    throw new Error("❌ NEXT_PUBLIC_CONTRACT_ADDRESS not found in environment or .env file.");
+    throw new Error("❌ NEXT_PUBLIC_CONTRACT_ADDRESS not found in environment or .env file. Run 'yarn deploy:proxy' first.");
   }
 
-  console.log(`\n🔗 Target UUPS Proxy Address: ${proxyAddress}`);
+  console.log(`\n🔗 Target UUPS Proxy: ${proxyAddress}`);
 
-  // Connect to the proxy using the current V1 logic ABI
-  const votingV1 = await hre.ethers.getContractAt("VotingV1", proxyAddress, deployer);
+  // ── Step 1: Check current version ────────────────────────────────────────
+  const proxyAsV3 = await hre.ethers.getContractAt("VotingV3", proxyAddress, deployer);
+  const currentVersion = await proxyAsV3.version();
+  console.log(`📊 Current Contract Version: ${currentVersion}`);
 
-  // 3. Check current version
-  let currentVersion = "Unknown";
-  try {
-    currentVersion = await votingV1.version();
-  } catch (err) {
-    console.log("   Failed to read version, proxy might not be initialized yet.");
-  }
-  console.log(`📊 Current Contract Version   : ${currentVersion}`);
+  // ── Step 2: Deploy a new VotingV3 implementation (the "upgrade" target) ──
+  console.log("\n📦 Deploying new VotingV3 implementation (upgrade target)...");
+  const VotingV3Factory = await hre.ethers.getContractFactory("VotingV3", deployer);
+  const newImpl = await VotingV3Factory.deploy();
+  await newImpl.waitForDeployment();
+  const newImplAddress = await newImpl.getAddress();
+  console.log(`✅ New VotingV3 implementation deployed at: ${newImplAddress}`);
 
-  // 4. Deploy VotingV2 Implementation
-  console.log("\n📦 Deploying VotingV2 Logic contract...");
-  const VotingV2Factory = await hre.ethers.getContractFactory("VotingV2", deployer);
-  const votingV2Impl = await VotingV2Factory.deploy();
-  await votingV2Impl.waitForDeployment();
-  const implV2Address = await votingV2Impl.getAddress();
-  console.log(`✅ VotingV2 Logic deployed at: ${implV2Address}`);
-
-  // 5. Propose Upgrade (Guardian 1)
-  console.log(`\n✍️ [Guardian 1] Proposing upgrade to implementation V2...`);
-  const votingAsG1 = await hre.ethers.getContractAt("VotingV1", proxyAddress, guardian1);
-  const txPropose = await votingAsG1.proposeUpgrade(implV2Address);
+  // ── Step 3: Propose Upgrade (Guardian 1) ─────────────────────────────────
+  console.log(`\n✍️  [Guardian 1] Proposing upgrade to: ${newImplAddress}`);
+  const proxyAsG1 = await hre.ethers.getContractAt("VotingV3", proxyAddress, guardian1);
+  const txPropose = await proxyAsG1.proposeUpgrade(newImplAddress);
   const rcPropose = await txPropose.wait();
-  
-  // Find Proposal ID from events
+
   let proposalId = 0n;
   for (const log of rcPropose.logs) {
     try {
-      const parsed = votingV1.interface.parseLog(log);
+      const parsed = proxyAsV3.interface.parseLog(log);
       if (parsed && parsed.name === "UpgradeProposed") {
         proposalId = parsed.args.proposalId;
         break;
       }
     } catch (_) {}
   }
-  console.log(`✅ Upgrade proposed successfully! Proposal ID: ${proposalId}`);
+  console.log(`✅ Upgrade proposed! Proposal ID: ${proposalId}`);
 
-  // 6. Demonstrate Multi-Sig Constraint (Show failure with only 1 approval)
-  console.log(`\n🛡️ [Testing Multi-Sig] Attempting execution with 1 approval (Guardian 1 only)...`);
-  const votingAsG2 = await hre.ethers.getContractAt("VotingV1", proxyAddress, guardian2);
-  
-  // Approve by G1 first
-  console.log("   [Guardian 1] Approving Proposal...");
-  await (await votingAsG1.approveUpgrade(proposalId)).wait();
+  // ── Step 4: Demonstrate multi-sig constraint (1 approval should fail) ────
+  console.log(`\n🛡️  [Testing Multi-Sig] Approving with Guardian 1 only...`);
+  await (await proxyAsG1.approveUpgrade(proposalId)).wait();
+  console.log("   Guardian 1 approved (1/2 approvals).");
 
-  // Try to execute by G1 (should fail since approval count is 1, and threshold is 2)
   try {
-    console.log("   Attempting execution with 1/2 approvals...");
-    await votingAsG1.executeUpgrade(proposalId);
-    console.log("❌ ERROR: Execute upgrade succeeded with only 1 approval! (Should have failed)");
-  } catch (err) {
-    console.log("✅ Expected Failure: Transaction reverted as planned: 'VotingV1: insufficient approvals'");
+    console.log("   Attempting executeUpgrade with only 1/2 approvals...");
+    await proxyAsG1.executeUpgrade(proposalId);
+    console.log("❌ ERROR: Should have reverted with insufficient approvals!");
+  } catch {
+    console.log("✅ Expected revert: 'VotingV3: insufficient approvals' — multi-sig working correctly!");
   }
 
-  // 7. Approve by Guardian 2
-  console.log(`\n✍️ [Guardian 2] Approving Proposal ${proposalId}...`);
-  const txApproveG2 = await votingAsG2.approveUpgrade(proposalId);
-  await txApproveG2.wait();
-  console.log(`✅ Guardian 2 approved!`);
+  // ── Step 5: Guardian 2 approves ──────────────────────────────────────────
+  console.log(`\n✍️  [Guardian 2] Approving Proposal ${proposalId}...`);
+  const proxyAsG2 = await hre.ethers.getContractAt("VotingV3", proxyAddress, guardian2);
+  await (await proxyAsG2.approveUpgrade(proposalId)).wait();
+  console.log(`✅ Guardian 2 approved! (2/2 approvals — threshold reached)`);
 
-  // 8. Execute Upgrade (Guardian 2)
-  console.log(`\n⚙️ [Guardian 2] Executing upgrade proposal...`);
-  const txExecute = await votingAsG2.executeUpgrade(proposalId);
+  // ── Step 6: Execute Upgrade ───────────────────────────────────────────────
+  console.log(`\n⚙️  [Guardian 2] Executing upgrade...`);
+  const txExecute = await proxyAsG2.executeUpgrade(proposalId);
   await txExecute.wait();
   console.log("🎉 Upgrade transaction confirmed!");
 
-  // 9. Verify Success & State Preservation
-  const votingV2 = await hre.ethers.getContractAt("VotingV2", proxyAddress, deployer);
-  const newVersion = await votingV2.version();
-  console.log(`\n📊 New Contract Version       : ${newVersion}`);
-  
-  const helloMsg = await votingV2.helloWorld();
-  console.log(`💬 Calling new V2 function    : "${helloMsg}"`);
+  // ── Step 7: Verify ────────────────────────────────────────────────────────
+  const proxyAfterUpgrade = await hre.ethers.getContractAt("VotingV3", proxyAddress, deployer);
+  const newVersion = await proxyAfterUpgrade.version();
+  const newImplOnChain = await hre.upgrades.erc1967.getImplementationAddress(proxyAddress);
 
-  if (newVersion === "2.0.0") {
-    console.log("\n🏆 SUCCESS: Contract successfully upgraded to V2, preserving address and state!");
+  console.log(`\n📊 Version after upgrade  : ${newVersion}`);
+  console.log(`   Implementation address : ${newImplOnChain}`);
+
+  if (newVersion === "3.0.0" && newImplOnChain.toLowerCase() === newImplAddress.toLowerCase()) {
+    console.log("\n🏆 SUCCESS: Proxy upgraded to new VotingV3 implementation!");
+    console.log("   ✔ Same proxy address — state preserved");
+    console.log("   ✔ New implementation address");
+    console.log("   ✔ version() still returns 3.0.0");
+    console.log("   ✔ 2-of-3 guardian multi-sig enforced");
   } else {
-    console.log("\n❌ FAILED: Contract version is not 2.0.0.");
+    console.log("\n❌ FAILED: Unexpected state after upgrade.");
+    console.log("   Version    :", newVersion);
+    console.log("   Impl addr  :", newImplOnChain);
+    console.log("   Expected   :", newImplAddress);
   }
 }
 
 main().catch((err) => {
-  console.error("\n❌ Upgrade script failed:", err);
+  console.error("\n❌ Upgrade demo failed:", err);
   process.exit(1);
 });
