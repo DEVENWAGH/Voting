@@ -19,7 +19,11 @@ export async function POST(req) {
       return NextResponse.json({ error: 'Voter not found.' }, { status: 404 });
     }
 
-    // 2. Fetch or create the biometric record and set twin status to pending
+    // 2. Resolve orgSlug / electionId from voter record if not provided
+    const resolvedOrgSlug = orgSlug || voter.orgSlug || '';
+    const resolvedElectionId = electionId || voter.electionId || '';
+
+    // 3. Fetch or create the biometric record and set twin status to pending
     let record = await BiometricHash.findOne({ nullifierHash });
 
     if (!record) {
@@ -31,12 +35,17 @@ export async function POST(req) {
         twinVerificationStatus: 'pending',
         twinNotes: 'User submitted twin verification request.',
         registeredAt: new Date(),
+        orgSlug: resolvedOrgSlug,
+        electionId: resolvedElectionId,
       });
     } else {
       record.twinVerificationStatus = 'pending';
       if (!record.twinNotes) {
         record.twinNotes = 'User requested twin verification override.';
       }
+      // Backfill orgSlug / electionId if missing on an existing record
+      if (!record.orgSlug && resolvedOrgSlug) record.orgSlug = resolvedOrgSlug;
+      if (!record.electionId && resolvedElectionId) record.electionId = resolvedElectionId;
       await record.save();
     }
 

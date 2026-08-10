@@ -137,7 +137,7 @@ export async function POST(req) {
             matchedEmail = matchedVoter.email;
           }
 
-          // Save pending twin record
+          // Save pending twin record (include org scoping for admin panel queries)
           await BiometricHash.findOneAndUpdate(
             { nullifierHash },
             {
@@ -152,6 +152,8 @@ export async function POST(req) {
               twinMatchSimilarity: Math.round(otherMatch.similarity),
               twinNotes: 'Automatically flagged: high similarity match with another registered face.',
               faceAttributes,
+              orgSlug: voter.orgSlug || '',
+              electionId: voter.electionId || '',
             },
             { upsert: true }
           );
@@ -215,6 +217,9 @@ export async function POST(req) {
         registeredAt: new Date(),
         faceId,
         twinVerificationStatus,
+        // Store org scoping so admin twin-requests panel can filter by election
+        orgSlug: voter.orgSlug || '',
+        electionId: voter.electionId || '',
       },
       { upsert: true, returnDocument: 'after' }
     );

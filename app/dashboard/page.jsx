@@ -223,6 +223,7 @@ function TwinOverridesPanel({ slug, electionId }) {
   const [notes, setNotes] = useState('');
   const [processingId, setProcessingId] = useState(null);
   const [msg, setMsg] = useState(null);
+  const [backfilling, setBackfilling] = useState(false);
 
   // Fetch twin override requests
   const { data: requests = [], isLoading, refetch } = useQuery({
@@ -256,13 +257,38 @@ function TwinOverridesPanel({ slug, electionId }) {
     }
   };
 
+  const handleBackfill = async () => {
+    setBackfilling(true);
+    setMsg(null);
+    try {
+      const res = await fetch('/api/admin/fix-biometric-org-scope', { method: 'POST' });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error || 'Backfill failed.');
+      setMsg({ type: 'success', text: data.message });
+      refetch();
+    } catch (err) {
+      setMsg({ type: 'error', text: err.message });
+    } finally {
+      setBackfilling(false);
+    }
+  };
+
   return (
     <div className="space-y-4 pt-4 border-t border-hairline">
-      <div>
-        <h4 className="text-ink font-semibold flex items-center gap-2 text-sm">
-          <Shield size={15} className="text-primary" /> Twin Verification Overrides
-        </h4>
-        <p className="text-xs text-body mt-0.5">Manage identity overrides for identical twins sharing similar facial geometry.</p>
+      <div className="flex items-start justify-between gap-3">
+        <div>
+          <h4 className="text-ink font-semibold flex items-center gap-2 text-sm">
+            <Shield size={15} className="text-primary" /> Twin Verification Overrides
+          </h4>
+          <p className="text-xs text-body mt-0.5">Manage identity overrides for identical twins sharing similar facial geometry.</p>
+        </div>
+        <button
+          onClick={() => refetch()}
+          disabled={isLoading}
+          className="flex items-center gap-1.5 text-xs text-body hover:text-ink border border-hairline px-3 py-1.5 rounded-full bg-canvas transition cursor-pointer shrink-0 disabled:opacity-50"
+        >
+          <RefreshCw size={11} className={isLoading ? 'animate-spin' : ''} /> Sync
+        </button>
       </div>
 
       {msg && <Toast type={msg.type} msg={msg.text} />}
@@ -270,8 +296,19 @@ function TwinOverridesPanel({ slug, electionId }) {
       {isLoading ? (
         <div className="flex justify-center py-4"><Loader2 className="animate-spin text-primary" size={20} /></div>
       ) : requests.length === 0 ? (
-        <div className="text-center py-6 text-body text-xs border border-dashed border-hairline rounded-xl bg-canvas">
-          No twin override requests found for this election.
+        <div className="text-center py-6 border border-dashed border-hairline rounded-xl bg-canvas space-y-3">
+          <p className="text-body text-xs font-semibold">No twin override requests found for this election.</p>
+          <p className="text-muted text-[11px] px-4">
+            If you believe requests exist but aren't showing, existing biometric records may predate election scoping.
+            Use the sync button below to backfill missing data.
+          </p>
+          <button
+            onClick={handleBackfill}
+            disabled={backfilling}
+            className="inline-flex items-center gap-1.5 text-xs bg-surface-strong hover:bg-hairline border border-hairline text-ink px-4 py-2 rounded-full font-semibold transition cursor-pointer disabled:opacity-50"
+          >
+            {backfilling ? <><Loader2 size={11} className="animate-spin" /> Backfilling...</> : <><RefreshCw size={11} /> Sync Existing Records</>}
+          </button>
         </div>
       ) : (
         <div className="overflow-x-auto rounded-xl border border-hairline bg-canvas shadow-sm">

@@ -16,24 +16,52 @@ export async function GET(req) {
 
     await connectDB();
 
-    // 1. Find all voters for this organization and election
-    const query = { orgSlug };
-    if (electionId) query.electionId = electionId;
-    const voters = await Voter.find(query).select('name email nullifierHash').lean();
+    // ── Strategy 1: Direct orgSlug+electionId query on BiometricHash ──────────
+    // This works for records created/updated after the schema migration that
+    // added orgSlug/electionId fields.
+    const directQuery = { orgSlug, twinVerificationStatus: { $ne: 'none' } };
+    if (electionId) directQuery.electionId = electionId;
+    const directRecords = await BiometricHash.find(directQuery).lean();
+
+    // ── Strategy 2: Voter-scoped join (legacy / fallback) ─────────────────────
+    // Finds voters for this org+election that have a nullifierHash, then looks up
+    // their BiometricHash records. Covers records created before the schema change.
+    const voterQuery = { orgSlug };
+    if (electionId) voterQuery.electionId = electionId;
+    const voters = await Voter.find(voterQuery).select('name email nullifierHash').lean();
     const voterMap = new Map(voters.map(v => [v.nullifierHash, v]));
-
-    // 2. Find biometric records with active twin status for these voters
     const nullifierHashes = voters.map(v => v.nullifierHash).filter(Boolean);
-    const biometricRecords = await BiometricHash.find({
-      nullifierHash: { $in: nullifierHashes },
-      twinVerificationStatus: { $ne: 'none' }
-    }).lean();
 
-    // 3. Map biometric records back to voter details and include matched voter details
-    const requests = await Promise.all(biometricRecords.map(async (record) => {
-      const voter = voterMap.get(record.nullifierHash);
-      
-      // Look up the matched voter's details (using their nullifierHash)
+    let legacyRecords = [];
+    if (nullifierHashes.length > 0) {
+      // Exclude any already found via Strategy 1 to avoid duplicates
+      const directNullifiers = new Set(directRecords.map(r => r.nullifierHash));
+      legacyRecords = await BiometricHash.find({
+        nullifierHash: { $in: nullifierHashes },
+        twinVerificationStatus: { $ne: 'none' },
+        // exclude ones already captured by Strategy 1
+        ...(directNullifiers.size > 0 ? { nullifierHash: { $in: nullifierHashes, $nin: [...directNullifiers] } } : {}),
+      }).lean();
+    }
+
+    // Merge and de-duplicate by nullifierHash
+    const allRecordsMap = new Map();
+    for (const r of [...directRecords, ...legacyRecords]) {
+      if (!allRecordsMap.has(r.nullifierHash)) {
+        allRecordsMap.set(r.nullifierHash, r);
+      }
+    }
+    const allRecords = [...allRecordsMap.values()];
+
+    // Map biometric records to enriched response objects
+    const requests = await Promise.all(allRecords.map(async (record) => {
+      // Try to find voter info from voterMap (Strategy 2 path) or by direct lookup
+      let voter = voterMap.get(record.nullifierHash);
+      if (!voter) {
+        voter = await Voter.findOne({ nullifierHash: record.nullifierHash }).select('name email').lean();
+      }
+
+      // Look up the matched voter's details
       let matchedVoterName = 'Unknown';
       let matchedVoterEmail = record.twinMatchedEmail || 'Unknown';
       if (record.twinMatchedNullifier) {
