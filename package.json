@@ -9,7 +9,6 @@
     "build": "next build",
     "start": "next start",
     "lint": "next lint",
-    "test": "mocha test/**/*.test.js",
     "compile": "hardhat compile",
     "hardhat:node": "hardhat node --hostname 0.0.0.0",
     "deploy:proxy": "hardhat run scripts/deployProxy.js --network localhost",
@@ -18,7 +17,13 @@
     "deploy:v2-sepolia": "hardhat run scripts/deployV2Impl.js --network sepolia",
     "vanish": "node scripts/vanish.js",
     "db:start": "docker compose up -d",
-    "db:stop": "docker compose down"
+    "db:stop": "docker compose down",
+    "test": "mocha test/rateLimit.test.js test/preflightCache.test.js test/biometric.test.js --timeout 10000",
+    "test:contracts": "hardhat test test/VotingV3.test.js --network hardhat",
+    "test:security": "hardhat test test/securityAttacks.test.js --network hardhat",
+    "test:unit": "mocha test/rateLimit.test.js test/preflightCache.test.js test/biometric.test.js --timeout 10000",
+    "test:e2e": "hardhat run test/integration/e2e.js --network hardhat",
+    "test:all": "node test/run-all-tests.js"
   },
   "dependencies": {
     "@aws-sdk/client-rekognition": "^3.1081.0",
