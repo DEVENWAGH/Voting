@@ -1,25 +1,25 @@
 # BlockVote Threat Model
 
-> **Version**: 1.0  
+> **Version**: 2.0  
 > **Last Updated**: August 2026  
-> **Status**: Active
+> **Status**: Active (VotingV3 Ready)
 
 ## Security Properties
 
 | Property | Goal | Implementation Status |
 |----------|------|----------------------|
 | **Eligibility** | Only authorized voters can vote | ✅ Email lookup + on-chain registration + biometric |
-| **One-person-one-vote** | Voter cannot vote twice | ✅ On-chain nullifier + preflight cache |
-| **Vote secrecy** | Nobody can learn who the voter selected | 🟡 Server sees plaintext candidateId (P2 improvement) |
-| **Vote integrity** | Nobody can modify a submitted vote | ✅ Blockchain immutability |
-| **Coercion resistance** | Voter cannot easily prove how they voted | 🟡 Receipt email no longer reveals candidate (P0 done), re-voting not yet supported |
-| **Receipt-freeness** | No useful "proof" of vote choice | ✅ Email receipt and audit endpoint no longer expose candidate choice |
-| **Device security** | Malware shouldn't easily steal the vote | ⚠️ Browser is outside the trust boundary |
+| **One-person-one-vote** | Voter cannot vote twice | ✅ On-chain nullifier + preflight cache (re-vote replaces previous choice) |
+| **Vote secrecy** | Nobody can learn who the voter selected | 🟡 Smart contract event is private (`VoteCastPrivate`), but relay server sees plaintext `candidateId` during submission |
+| **Vote integrity** | Nobody can modify a submitted vote | ✅ Blockchain immutability + smart contract validation |
+| **Coercion resistance** | Voter cannot easily prove how they voted | ✅ Re-voting supported in VotingV3 (`castVoteRelayedV3`), receipt email strips candidate name |
+| **Receipt-freeness** | No useful "proof" of vote choice | ✅ Email receipt and public audit endpoint do NOT expose candidate choice |
+| **Device security** | Malware shouldn't easily steal the vote | ⚠️ Browser is outside the trust boundary; shoulder-surfing blur protection added |
 | **Network privacy** | Network observer shouldn't correlate voter → candidate | ❌ No privacy relay / mixnet |
-| **Blockchain integrity** | Nobody can alter the election record | ✅ Smart contract + multi-sig governance |
-| **Availability** | Attackers cannot easily take the election offline | 🟡 Rate limiting added, no DDoS infrastructure |
-| **Auditability** | Anyone authorized can verify election correctness | ✅ Public audit explorer + blockchain events |
-| **Admin separation** | One admin cannot control entire election | ✅ 2-of-3 guardian multi-sig |
+| **Blockchain integrity** | Nobody can alter the election record | ✅ Smart contract + 2-of-3 guardian multi-sig governance |
+| **Availability** | Attackers cannot easily take the election offline | 🟡 Rate limiting added (`lib/rateLimit.js`), AWS / standalone deployment options documented |
+| **Auditability** | Anyone authorized can verify election correctness | ✅ Public audit explorer + `ballotHash` emission in VotingV3 |
+| **Admin separation** | One admin cannot control entire election | ✅ 2-of-3 guardian multi-sig for contract upgrades |
 
 ---
 
@@ -28,18 +28,18 @@
 ### A1 — Malicious Voter
 **Goal**: Double vote, fake credentials, replay attack.  
 **Mitigations**:
-- On-chain `hasVoted` mapping prevents duplicate votes
+- On-chain `hasVoted` and `voteChoice` mapping track voter state
 - Nullifier hash computed server-side with `SERVER_IDENTITY_SECRET`
 - OTP is bcrypt-hashed with 3-attempt limit and 5-min TTL
 - Biometric face verification via AWS Rekognition
 
-### A2 — Coercer (Physical)
+### A2 — Coercer (Physical / Observational)
 **Goal**: Observe screen, force candidate selection, demand proof.  
 **Mitigations**:
-- ✅ Receipt email does NOT contain candidate name
-- ✅ Audit endpoint does NOT expose candidate choice
-- ❌ Re-voting not yet supported (planned for VotingV3)
-- ❌ No deniable credentials
+- ✅ **Re-voting Supported (VotingV3)**: Voter can re-vote privately later; only the latest choice counts in the final tally
+- ✅ **Shoulder-Surfing Blur**: Selected candidate is blurred during OTP entry; tap-to-reveal
+- ✅ **Receipt-freeness**: Email receipt and `/api/audit/verify` do NOT contain candidate name or ID
+- ❌ No deniable credentials or fake PIN system yet (Level 3 recommendation)
 
 ### A3 — Malicious Administrator
 **Goal**: Change candidates, modify votes, decrypt votes, alter tally.  
@@ -52,9 +52,9 @@
 ### A4 — Compromised Backend
 **Goal**: Link identities to ballots, modify ballots, steal credentials.  
 **Mitigations**:
-- ✅ VoteActivity no longer stores `voterNullifier` — breaks voter→vote correlation
-- ✅ VoteActivity no longer stores `voterLocation` — removes GPS metadata leak
-- ⚠️ Server still sees plaintext `candidateId` during vote casting (requires client-side encryption to fix)
+- ✅ `VoteActivity` no longer stores `voterNullifier` — breaks DB voter→vote correlation
+- ✅ `VoteActivity` no longer stores `voterLocation` — removes GPS metadata leak
+- ⚠️ Server still sees plaintext `candidateId` during vote submission (requires client-side homomorphic/ballot encryption to fix)
 - OTP is bcrypt-hashed, never stored in plaintext
 
 ### A5 — Blockchain Attacker
@@ -63,28 +63,28 @@
 - UUPS upgradeable proxy with 2-of-3 guardian gate
 - Phase transitions enforced by smart contract
 - Candidate list locked after voting starts
-- ⚠️ Currently single node — decentralization needed for production
+- `VoteCastPrivate` event emits `ballotHash` instead of plaintext `candidateId`
 
 ### A6 — Network Attacker
 **Goal**: MITM, traffic analysis, timing correlation.  
 **Mitigations**:
 - HTTPS/TLS enforced (HSTS header added)
-- ❌ No privacy relay or mixnet — IP visible to server
-- ❌ No timing obfuscation
+- Stricter CSP headers on voting paths
+- ❌ No privacy relay or mixnet — IP visible to application server
 
 ### A7 — Compromised Device
 **Goal**: Screen capture, keylogging, malicious browser extension.  
 **Mitigations**:
 - ⚠️ Browser is explicitly outside the trust boundary
 - CSP headers restrict script sources
-- iframe embedding blocked (X-Frame-Options: DENY)
+- iframe embedding blocked (`X-Frame-Options: DENY`)
 - Camera permissions restricted to self only
 
 ### A8 — Colluding Administrators
 **Goal**: Identity server + voting server to reconstruct Voter → Vote.  
 **Mitigations**:
-- ❌ Currently a single-server architecture — identity and voting not separated
-- ✅ VoteActivity no longer stores nullifier, reducing correlation surface
+- ❌ Single-server architecture — identity and voting currently run on same application server
+- ✅ `VoteActivity` no longer stores nullifier, reducing correlation surface
 
 ---
 
@@ -94,7 +94,7 @@
 ┌─────────────────────────────────────────────────┐
 │                TRUSTED                           │
 │                                                  │
-│  Smart Contract (on-chain enforcement)           │
+│  Smart Contract (on-chain enforcement, V3)       │
 │  Blockchain Network (immutable record)           │
 │  Guardian Multi-sig (2-of-3)                     │
 │  Server-side cryptographic operations            │
@@ -121,20 +121,16 @@
 
 ---
 
-## Known Limitations
+## Current Known Limitations & Future Roadmap
 
-1. **The server can read votes**: The relay server receives plaintext `candidateId`. A compromised server operator can see all votes. This requires client-side encryption (Level 2) to fix.
-
-2. **No re-voting**: If a voter is coerced, they cannot change their vote later. The `hasVoted` flag is a permanent boolean. VotingV3 should support re-voting.
-
-3. **Single blockchain node**: The system currently runs against a single RPC endpoint. A compromised node could censor transactions.
-
-4. **Same database for identity and votes**: While `VoteActivity` no longer stores `voterNullifier`, both `Voter` (with email) and `VoteActivity` (with candidateId) are in the same MongoDB instance. A database compromise exposes both.
-
-5. **Blockchain events leak candidateId**: The `VoteCast` event includes `candidateId`. This cannot be fixed without a contract upgrade (VotingV3).
+1. **Relay sees candidateId**: The server receives plaintext `candidateId` during submission. Homomorphic / client-side encryption is needed to fully resolve this (Level 3).
+2. **Single RPC node**: The system connects to a single RPC endpoint. Multi-provider RPC fallback or decentralized validator set recommended for production.
+3. **Single database instance**: `Voter` (identity) and `VoteActivity` (anonymized votes) reside in the same MongoDB cluster, though unlinked at the schema level.
+4. **Physical environment observation**: While UI blurring and re-voting mitigate physical coercion, a physical camera/observer looking at the screen during candidate selection remains outside cryptographic control.
 
 ---
 
 ## Disclaimer
 
-> Blockchain provides tamper-evident, consensus-backed election records, but voter privacy and coercion resistance require additional cryptographic and system-level mechanisms beyond what blockchain alone offers. BlockVote v1 implements foundational security (Level 1) and privacy hardening, but does not yet implement anonymous credentials, zero-knowledge eligibility proofs, homomorphic tallying, or verifiable shuffles.
+> Blockchain provides tamper-evident, consensus-backed election records, but voter privacy and coercion resistance require additional cryptographic and system-level mechanisms beyond what blockchain alone offers. BlockVote v3 implements foundational privacy hardening, receipt-freeness, shoulder-surfing protection, and re-voting coercion resistance.
+

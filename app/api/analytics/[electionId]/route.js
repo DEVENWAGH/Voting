@@ -97,17 +97,14 @@ export async function GET(request, { params }) {
     });
     const votesPerMinute = (recentCount / 10).toFixed(2);
 
-    // 8. Demographics & Geography (Age groups, roster gender, Rekognition gender, locations)
-    const votes = await VoteActivity.find({ electionId: eid }).lean();
-    const nullifierHashes = votes.map(v => v.voterNullifier).filter(Boolean);
-
-    const voters = await Voter.find({ nullifierHash: { $in: nullifierHashes }, electionId: eid }).lean();
-    const biometrics = await BiometricHash.find({ nullifierHash: { $in: nullifierHashes } }).lean();
-
-    const voterMap = {};
-    for (const v of voters) {
-      voterMap[v.nullifierHash] = v;
-    }
+    // 8. Demographics (aggregated from Voter collection — NOT linked to individual votes)
+    // PRIVACY: Demographics are computed from the voter ROSTER, not correlated
+    // with individual vote records. This means we know "40% of registered voters
+    // are female" but NOT "this specific vote was cast by a female voter."
+    const registeredVoters = await Voter.find({ electionId: eid, status: 'registered' }).lean();
+    const biometrics = await BiometricHash.find({
+      nullifierHash: { $in: registeredVoters.map(v => v.nullifierHash).filter(Boolean) }
+    }).lean();
 
     const bioMap = {};
     for (const b of biometrics) {
@@ -139,25 +136,9 @@ export async function GET(request, { params }) {
     let genderMismatches = 0;
     let genderCompareUnknowns = 0;
 
-    const locations = [];
-
-    for (const vote of votes) {
-      // Geolocation details
-      if (vote.voterLocation) {
-        locations.push({
-          latitude: vote.voterLocation.latitude,
-          longitude: vote.voterLocation.longitude,
-          city: vote.voterLocation.city || 'Local Area',
-          country: vote.voterLocation.country || 'Local Region',
-          timestamp: vote.timestamp
-        });
-      }
-
-      const voter = voterMap[vote.voterNullifier];
-      const bio = bioMap[vote.voterNullifier];
-
+    for (const voter of registeredVoters) {
       // Age groups
-      if (voter && voter.age) {
+      if (voter.age) {
         const age = voter.age;
         if (age >= 18 && age <= 25) ageGroups['18-25']++;
         else if (age >= 26 && age <= 35) ageGroups['26-35']++;
@@ -170,7 +151,7 @@ export async function GET(request, { params }) {
 
       // Roster genders
       let rGender = 'Unknown';
-      if (voter && voter.gender) {
+      if (voter.gender) {
         const g = voter.gender.trim().toLowerCase();
         if (g === 'male' || g === 'm') { rGender = 'Male'; rosterGenders['Male']++; }
         else if (g === 'female' || g === 'f') { rGender = 'Female'; rosterGenders['Female']++; }
@@ -181,6 +162,7 @@ export async function GET(request, { params }) {
       }
 
       // Rekognition genders
+      const bio = bioMap[voter.nullifierHash];
       let awsGender = 'Unknown';
       if (bio && bio.faceAttributes && bio.faceAttributes.gender) {
         const g = bio.faceAttributes.gender.trim().toLowerCase();
@@ -203,6 +185,9 @@ export async function GET(request, { params }) {
       }
     }
 
+    // Re-vote stats (V3 feature)
+    const revoteCount = await VoteActivity.countDocuments({ electionId: eid, isRevote: true });
+
     return NextResponse.json({
       success: true,
       data: {
@@ -221,6 +206,7 @@ export async function GET(request, { params }) {
           votesPerMinute: Number(votesPerMinute),
           peakHour: peakHour ? { hour: peakHour.hour, votes: peakHour.count } : null,
           candidateCount: candidateBreakdown.length,
+          revoteCount,
         },
         hourlyDistribution,
         candidateBreakdown,
@@ -229,8 +215,10 @@ export async function GET(request, { params }) {
           txHash: v.txHash,
           blockNumber: v.blockNumber,
           timestamp: v.timestamp,
+          isRevote: v.isRevote || false,
         })),
         demographics: {
+          registeredVoterCount: registeredVoters.length,
           ageGroups,
           rosterGenders,
           rekognitionGenders,
@@ -242,7 +230,7 @@ export async function GET(request, { params }) {
               ? Number(((genderMatches / (genderMatches + genderMismatches)) * 100).toFixed(1))
               : 100
           },
-          locations
+          // PRIVACY: location analytics removed — GPS data is no longer collected
         }
       },
     });

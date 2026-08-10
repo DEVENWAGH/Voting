@@ -1,15 +1,64 @@
 version: '3.8'
 
 services:
+  # ── MongoDB ────────────────────────────────────────────────────────────────
   mongodb:
     image: mongo:7.0
-    container_name: voting-mongodb
+    container_name: blockvote-mongodb
     ports:
       - '27017:27017'
     volumes:
       - mongodb_data:/data/db
     restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "mongosh", "--eval", "db.adminCommand('ping')"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  # ── Hardhat Local Blockchain ───────────────────────────────────────────────
+  blockchain:
+    image: node:20-alpine
+    container_name: blockvote-chain
+    working_dir: /app
+    volumes:
+      - .:/app
+      - chain_modules:/app/node_modules
+    ports:
+      - '8545:8545'
+    command: >
+      sh -c "yarn install --frozen-lockfile && npx hardhat node --hostname 0.0.0.0"
+    restart: unless-stopped
+
+  # ── Next.js App (development mode) ─────────────────────────────────────────
+  app:
+    image: node:20-alpine
+    container_name: blockvote-app
+    working_dir: /app
+    volumes:
+      - .:/app
+      - app_modules:/app/node_modules
+    ports:
+      - '3000:3000'
+    env_file:
+      - .env
+    environment:
+      - MONGODB_URI=mongodb://mongodb:27017/blockvote
+      - RPC_URL=http://blockchain:8545
+      - NEXT_PUBLIC_RPC_URL=http://localhost:8545
+    depends_on:
+      mongodb:
+        condition: service_healthy
+      blockchain:
+        condition: service_started
+    command: >
+      sh -c "yarn install --frozen-lockfile && yarn dev"
+    restart: unless-stopped
 
 volumes:
   mongodb_data:
+    driver: local
+  chain_modules:
+    driver: local
+  app_modules:
     driver: local
