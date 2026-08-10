@@ -8,18 +8,19 @@ export const metadata = {
   description:
     "Secure, transparent elections for colleges, companies, DAOs and communities. Powered by Ethereum.",
   manifest: "/manifest.json",
-  themeColor: "#6366f1",
   appleWebApp: {
     capable: true,
     statusBarStyle: "black-translucent",
     title: "BlockVote",
   },
-  viewport: {
-    width: "device-width",
-    initialScale: 1,
-    maximumScale: 1,
-    userScalable: false,
-  },
+};
+
+export const viewport = {
+  themeColor: "#6366f1",
+  width: "device-width",
+  initialScale: 1,
+  maximumScale: 1,
+  userScalable: false,
 };
 
 export default function RootLayout({ children }) {

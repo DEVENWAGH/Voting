@@ -57,25 +57,33 @@ export const { handlers, auth, signIn, signOut } = NextAuth({
     async signIn({ user, account }) {
       // For Google OAuth: upsert org record keyed by google email
       if (account?.provider === 'google') {
+        const email = user?.email?.toLowerCase()?.trim();
+        if (!email) {
+          console.error('[auth] Google sign-in error: No email address returned from Google profile.');
+          return false;
+        }
+
         await connectDB();
-        let org = await Organization.findOne({ adminEmail: user.email.toLowerCase() });
+        let org = await Organization.findOne({ adminEmail: email });
         if (!org) {
           // Create a minimal org record so the user can complete setup later
-          const slug = user.email.split('@')[0].toLowerCase().replace(/[^a-z0-9]/g, '-');
-          let finalSlug = slug;
+          const slugBase = email.split('@')[0].replace(/[^a-z0-9]/g, '-') || 'org';
+          let finalSlug = slugBase;
           let counter = 1;
           while (await Organization.exists({ slug: finalSlug })) {
-            finalSlug = `${slug}-${counter++}`;
+            finalSlug = `${slugBase}-${counter++}`;
           }
           org = await Organization.create({
-            name:            user.name || user.email.split('@')[0],
+            name:            user.name || slugBase,
             slug:            finalSlug,
-            adminEmail:      user.email.toLowerCase(),
-            googleId:        user.id,
+            email:           email,
+            adminEmail:      email,
+            googleId:        user.id || null,
             isEmailVerified: true, // Google OAuth accounts are pre-verified
           });
-        } else if (!org.googleId) {
-          org.googleId = user.id;
+        } else {
+          if (!org.email) org.email = email;
+          if (!org.googleId && user.id) org.googleId = user.id;
           org.isEmailVerified = true;
           await org.save();
         }
