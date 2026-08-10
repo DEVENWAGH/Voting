@@ -41,5 +41,10 @@ next-env.d.ts
 .kiro
 # End of https://www.toptal.com/developers/gitignore/api/nextjs
 
+# Hardhat build outputs & compiler cache
+/cache/
+/artifacts/
+
 # Hardhat local chain state — persists elections/votes across dev server restarts
 hardhat-state.json
+
