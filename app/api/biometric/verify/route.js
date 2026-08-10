@@ -5,8 +5,16 @@ import VoteActivity from '@/lib/models/VoteActivity';
 import { issueBiometricToken, getRekognitionClient } from '@/lib/biometric';
 import { DetectFacesCommand, CompareFacesCommand } from '@aws-sdk/client-rekognition';
 import { fetchFromIPFS } from '@/lib/ipfs';
+import { rateLimit } from '@/lib/rateLimit';
+
+// Rate limit: max 10 biometric verification attempts per 2 minutes per IP
+// This calls AWS Rekognition — rate limit prevents cost amplification attacks
+const biometricLimiter = rateLimit({ windowMs: 120_000, max: 10, keyPrefix: 'biometric-verify', message: 'Too many verification attempts. Please wait before trying again.' });
 
 export async function POST(req) {
+  const limited = biometricLimiter(req);
+  if (limited) return limited;
+
   try {
     const { nullifierHash, image, electionId } = await req.json();
 

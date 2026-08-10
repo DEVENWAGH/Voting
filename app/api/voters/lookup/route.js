@@ -1,8 +1,15 @@
 import { NextResponse } from 'next/server';
 import connectDB from '@/lib/db';
 import Voter from '@/lib/models/Voter';
+import { rateLimit } from '@/lib/rateLimit';
+
+// Rate limit: max 15 lookups per minute per IP (prevents email enumeration)
+const lookupLimiter = rateLimit({ windowMs: 60_000, max: 15, keyPrefix: 'voter-lookup', message: 'Too many lookup requests. Please try again later.' });
 
 export async function GET(request) {
+  const limited = lookupLimiter(request);
+  if (limited) return limited;
+
   try {
     await connectDB();
     const { searchParams } = new URL(request.url);

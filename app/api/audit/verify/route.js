@@ -1,6 +1,12 @@
 /**
  * GET /api/audit/verify?txHash=0x...
  * Public vote verification — confirm a transaction was recorded on-chain.
+ *
+ * PRIVACY — RECEIPT-FREENESS:
+ *   This endpoint intentionally does NOT return candidateId or candidateName.
+ *   Exposing the vote choice via txHash would allow coercers to verify a
+ *   voter's selection, breaking coercion resistance. The endpoint confirms
+ *   only that a vote transaction exists and is valid.
  */
 import { NextResponse } from 'next/server';
 import { ethers } from 'ethers';
@@ -61,8 +67,6 @@ export async function GET(req) {
     const status = receipt?.status === 1 ? 'success' : receipt ? 'failed' : 'unknown';
 
     let electionId = activity?.electionId ?? null;
-    let candidateId = activity?.candidateId ?? null;
-    let candidateName = null;
     let electionTitle = null;
     let orgName = null;
     let orgSlug = null;
@@ -70,6 +74,7 @@ export async function GET(req) {
     let timestamp = activity?.timestamp ?? null;
 
     // Parse VoteCast event from receipt logs if MongoDB has no record
+    // PRIVACY: We extract electionId for context, but NOT candidateId
     if (receipt && onContract && electionId == null) {
       const iface = new ethers.Interface(
         (await import('@/lib/contracts/VotingV1.json', { assert: { type: 'json' } })).default.abi,
@@ -79,7 +84,7 @@ export async function GET(req) {
           const parsed = iface.parseLog(log);
           if (parsed?.name === 'VoteCast') {
             electionId = parsed.args[0]; // bytes32 hex string
-            candidateId = Number(parsed.args[1]);
+            // candidateId intentionally NOT extracted — receipt-freeness
             break;
           }
         } catch {
@@ -98,17 +103,8 @@ export async function GET(req) {
           orgName = org?.name || election.orgSlug;
         }
       }
-
-      if (candidateId != null) {
-        try {
-          const contract = await getReadContract();
-          const cands = await contract.getCandidates(electionId);
-          const match = cands.find((c) => Number(c.id) === candidateId);
-          if (match) candidateName = match.name;
-        } catch {
-          // chain read optional
-        }
-      }
+      // PRIVACY: candidateId/candidateName intentionally NOT looked up.
+      // Exposing vote choice via txHash breaks receipt-freeness.
     }
 
     if (!timestamp && blockNumber) {
@@ -136,10 +132,9 @@ export async function GET(req) {
       electionTitle,
       orgSlug,
       orgName,
-      candidateId,
-      candidateName,
+      // candidateId and candidateName intentionally omitted for receipt-freeness
       message: verified
-        ? 'Vote transaction verified on the blockchain.'
+        ? 'Vote transaction verified on the blockchain. For voter privacy, the candidate choice is not disclosed.'
         : 'Transaction found but could not be fully verified as a successful vote.',
     });
   } catch (err) {

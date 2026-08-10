@@ -2,7 +2,7 @@
 const nextConfig = {
   reactStrictMode: true,
   // Tell Next.js not to bundle these — they run only on the server
-  serverExternalPackages: ['mongoose'],
+  serverExternalPackages: ['mongoose', 'resend'],
   images: {
     domains: ['as1.ftcdn.net'],
   },

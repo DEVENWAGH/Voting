@@ -11,10 +11,18 @@ import Organization from "@/lib/models/Organization";
 import EmailOTP from "@/lib/models/EmailOTP";
 import { sendOTPEmail } from "@/lib/mailer";
 import { preflightCheck } from "@/lib/preflightCache";
+import { rateLimit } from "@/lib/rateLimit";
 import bcrypt from "bcryptjs";
 import crypto from "crypto";
 
+// Rate limit: max 5 OTP requests per minute per IP
+const otpLimiter = rateLimit({ windowMs: 60_000, max: 5, keyPrefix: 'send-otp', message: 'Too many OTP requests. Please wait before trying again.' });
+
 export async function POST(req) {
+  // Rate limit check
+  const limited = otpLimiter(req);
+  if (limited) return limited;
+
   try {
     const { email, orgId, electionId } = await req.json();
 

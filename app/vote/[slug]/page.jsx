@@ -397,7 +397,10 @@ export default function VoterPortal() {
   const [voteSuccess, setVoteSuccess] = useState(false);
   const [txHash, setTxHash] = useState(null);
   const [formError, setFormError] = useState('');
-  const [voterLocation, setVoterLocation] = useState(null);
+
+  // SHOULDER-SURFING PROTECTION: candidate name is blurred by default
+  // during OTP entry. The voter can tap to reveal temporarily.
+  const [showCandidate, setShowCandidate] = useState(false);
 
   // ── Load org & elections ──
   const loadData = useCallback(async () => {
@@ -428,23 +431,6 @@ export default function VoterPortal() {
     setEmail(''); setOtp(''); setOtpSent(false);
     setBiometricToken(null); setSelectedCandidate(null);
     setVoteSuccess(false); setFormError('');
-    setVoterLocation(null);
-
-    if (typeof window !== 'undefined' && navigator.geolocation) {
-      navigator.geolocation.getCurrentPosition(
-        (pos) => {
-          setVoterLocation({
-            latitude: pos.coords.latitude,
-            longitude: pos.coords.longitude,
-            accuracy: pos.coords.accuracy
-          });
-        },
-        (err) => {
-          console.warn("Location permission denied or timed out:", err.message);
-        },
-        { enableHighAccuracy: true, timeout: 8000 }
-      );
-    }
 
     try {
       const r = await fetch(`/api/org/${slug}/elections/${e.id}/candidates`);
@@ -520,7 +506,6 @@ export default function VoterPortal() {
           orgId: org._id,
           electionId: selectedElection.id,
           candidateId: selectedCandidate,
-          location: voterLocation
         }),
       });
       const data = await res.json();
@@ -795,19 +780,22 @@ export default function VoterPortal() {
                         <CheckCircle2 size={14} /> Code dispatched to {email}
                       </div>
 
-                      <div className="bg-surface-soft border border-hairline rounded-xl p-4 text-sm">
+                      <div
+                        className="bg-surface-soft border border-hairline rounded-xl p-4 text-sm cursor-pointer group relative"
+                        onClick={() => setShowCandidate(prev => !prev)}
+                        title={showCandidate ? 'Click to hide candidate (privacy mode)' : 'Click to reveal your selection'}
+                      >
                         <p className="text-muted text-xs mb-1">Your vote for</p>
-                        <p className="font-bold text-ink">{candidates.find(c => c.id === selectedCandidate)?.name}</p>
-                        <p className="text-xs text-body">{candidates.find(c => c.id === selectedCandidate)?.party}</p>
-                        {voterLocation ? (
-                          <div className="mt-3 text-[10px] text-green-600 flex items-center gap-1 font-semibold">
-                            <span className="w-1.5 h-1.5 bg-green-500 rounded-full animate-ping" />
-                            <span>📍 Location secured: {voterLocation.latitude.toFixed(4)}, {voterLocation.longitude.toFixed(4)}</span>
-                          </div>
-                        ) : (
-                          <div className="mt-3 text-[10px] text-amber-500 flex items-center gap-1 font-semibold animate-pulse">
-                            <span>⚠️ Location access pending (defaults to IP/Region)</span>
-                          </div>
+                        <p className={`font-bold text-ink transition-all duration-200 ${showCandidate ? '' : 'blur-sm select-none'}`}>
+                          {candidates.find(c => c.id === selectedCandidate)?.name}
+                        </p>
+                        <p className={`text-xs text-body transition-all duration-200 ${showCandidate ? '' : 'blur-sm select-none'}`}>
+                          {candidates.find(c => c.id === selectedCandidate)?.party}
+                        </p>
+                        {!showCandidate && (
+                          <p className="text-[10px] text-muted mt-2 flex items-center gap-1">
+                            <span>🔒</span> Tap to reveal · Hidden for shoulder-surfing protection
+                          </p>
                         )}
                       </div>
 
@@ -843,7 +831,7 @@ export default function VoterPortal() {
               </div>
               <h2 className="text-2xl font-display font-normal text-ink mb-3">Vote Secured on Blockchain</h2>
               <p className="text-body text-sm mb-6 max-w-sm mx-auto leading-relaxed">
-                Your ballot for <strong className="text-ink font-semibold">{candidates.find(c => c.id === selectedCandidate)?.name}</strong> has been relayed and cryptographically recorded.
+                Your ballot has been relayed and cryptographically recorded. For your privacy, the candidate you voted for is not displayed.
               </p>
               <div className="bg-surface-soft border border-hairline rounded-lg p-4 inline-block text-left mb-8 max-w-full">
                 <p className="text-[10px] font-semibold text-muted uppercase tracking-wider mb-1">Cryptographic Receipt</p>
