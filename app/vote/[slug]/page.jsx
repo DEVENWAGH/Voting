@@ -11,6 +11,18 @@ import {
 } from 'lucide-react';
 import ElectionResults from '@/components/ElectionResults';
 import ThemeToggle from '@/components/ThemeToggle';
+import dynamic from 'next/dynamic';
+
+// Lazy-load LivenessGate to avoid bundling ML libs on initial page load
+const LivenessGate = dynamic(() => import('@/components/LivenessGate'), {
+  ssr: false,
+  loading: () => (
+    <div className="flex flex-col items-center justify-center p-8 gap-3">
+      <Loader2 size={28} className="text-indigo-500 animate-spin" />
+      <p className="text-slate-400 text-xs font-semibold">Loading Liveness Module...</p>
+    </div>
+  ),
+});
 
 // ─── Safe error message helper ──────────────────────────────────────────────
 function getErrMsg(err) {
@@ -21,123 +33,36 @@ function getErrMsg(err) {
   try { return String(err); } catch { return 'An unknown error occurred.'; }
 }
 
-// ─── Inline Face Scanner Component ───────────────────────────────────────────
+// ─── Inline Face Scanner Component (with LivenessGate) ──────────────────────
 function InlineFaceScanner({ nullifierHash, electionId, orgId, email, orgSlug, onSuccess, onCancel }) {
-  const videoRef = useRef(null);
-  const canvasRef = useRef(null);
-  const streamRef = useRef(null);
-  const animFrameRef = useRef(null);
-
-  const [cameraActive, setCameraActive] = useState(false);
+  const [livenessPassed, setLivenessPassed] = useState(false);
+  const [capturedImage, setCapturedImage] = useState(null);
   const [loading, setLoading] = useState(false);
-  const [countdown, setCountdown] = useState(-1);
   const [error, setError] = useState('');
-  const [statusText, setStatusText] = useState('Click "Start Camera" to begin');
-  const [liveness, setLiveness] = useState({ faceDetected: false, centered: false, lighting: false });
-  const [capturedImage, setCapturedImage] = useState(null); // base64 of captured frame
+  const [statusText, setStatusText] = useState('');
   const [scanDone, setScanDone] = useState(false);
 
   // Twin override request states
   const [isDuplicateFace, setIsDuplicateFace] = useState(false);
-  const [requestStatus, setRequestStatus] = useState('idle'); // 'idle' | 'submitting' | 'submitted' | 'error'
+  const [requestStatus, setRequestStatus] = useState('idle');
 
-  // Start webcam
-  const startCamera = async () => {
-    setError('');
-    setCapturedImage(null);
-    setScanDone(false);
-    try {
-      if (streamRef.current) streamRef.current.getTracks().forEach(t => t.stop());
-      const stream = await navigator.mediaDevices.getUserMedia({
-        video: { width: 640, height: 480, facingMode: 'user' }, audio: false
-      });
-      streamRef.current = stream;
-      if (videoRef.current) {
-        videoRef.current.srcObject = stream;
-        videoRef.current.play().catch(() => {});
-      }
-      setCameraActive(true);
-      setStatusText('Align your face in the oval guide');
-      // Simulate liveness after a second
-      setTimeout(() => setLiveness({ faceDetected: true, centered: true, lighting: true }), 1200);
-    } catch {
-      setError('Camera access denied. Please allow camera permissions and try again.');
-    }
-  };
-
-  const stopCamera = () => {
-    if (streamRef.current) {
-      streamRef.current.getTracks().forEach(t => t.stop());
-      streamRef.current = null;
-    }
-    if (animFrameRef.current) cancelAnimationFrame(animFrameRef.current);
-    setCameraActive(false);
-  };
-
-  // Canvas overlay loop
-  useEffect(() => {
-    if (!cameraActive || capturedImage) return;
-    const canvas = canvasRef.current;
-    const video = videoRef.current;
-    if (!canvas || !video) return;
-    const ctx = canvas.getContext('2d');
-    let active = true;
-
-    const draw = () => {
-      if (!active) return;
-      ctx.clearRect(0, 0, canvas.width, canvas.height);
-      ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
-      const cx = canvas.width / 2, cy = canvas.height / 2;
-      const rx = 110, ry = 145;
-      ctx.fillStyle = 'rgba(2, 6, 23, 0.65)';
-      ctx.fillRect(0, 0, canvas.width, canvas.height);
-      ctx.save();
-      ctx.globalCompositeOperation = 'destination-out';
-      ctx.fillStyle = '#000';
-      ctx.beginPath(); ctx.ellipse(cx, cy, rx, ry, 0, 0, Math.PI * 2); ctx.fill();
-      ctx.restore();
-      const color = liveness.centered ? '#10b981' : '#6366f1';
-      ctx.strokeStyle = color; ctx.lineWidth = 3;
-      ctx.beginPath(); ctx.ellipse(cx, cy, rx, ry, 0, 0, Math.PI * 2); ctx.stroke();
-      if (!loading && countdown === -1) {
-        const scanY = cy + Math.sin(Date.now() * 0.003) * ry;
-        ctx.save();
-        ctx.beginPath(); ctx.ellipse(cx, cy, rx, ry, 0, 0, Math.PI * 2); ctx.clip();
-        const grad = ctx.createLinearGradient(0, scanY - 6, 0, scanY + 6);
-        grad.addColorStop(0, 'rgba(99,102,241,0)');
-        grad.addColorStop(0.5, 'rgba(99,102,241,0.6)');
-        grad.addColorStop(1, 'rgba(99,102,241,0)');
-        ctx.fillStyle = grad;
-        ctx.fillRect(cx - rx, scanY - 6, rx * 2, 12);
-        ctx.restore();
-      }
-      animFrameRef.current = requestAnimationFrame(draw);
-    };
-    draw();
-    return () => { active = false; if (animFrameRef.current) cancelAnimationFrame(animFrameRef.current); };
-  }, [cameraActive, liveness, loading, countdown, capturedImage]);
-
-  // Capture & submit
-  const capture = useCallback(async () => {
+  // Called when LivenessGate completes all 4 steps
+  const handleLivenessCapture = useCallback(async (base64Image) => {
+    setCapturedImage(base64Image);
+    setLivenessPassed(true);
     setLoading(true);
     setStatusText('Verifying with AWS Rekognition...');
     setIsDuplicateFace(false);
-    try {
-      const video = videoRef.current;
-      const tmp = document.createElement('canvas');
-      tmp.width = video.videoWidth || 640;
-      tmp.height = video.videoHeight || 480;
-      tmp.getContext('2d').drawImage(video, 0, 0, tmp.width, tmp.height);
-      const base64Image = tmp.toDataURL('image/jpeg', 0.85);
-      setCapturedImage(base64Image);
-      stopCamera();
+    setError('');
 
+    try {
       const res = await fetch('/api/biometric/verify', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ nullifierHash, image: base64Image, electionId })
       });
       const data = await res.json();
+
       if (!res.ok) {
         if (data.isDuplicate) {
           setIsDuplicateFace(true);
@@ -152,7 +77,6 @@ function InlineFaceScanner({ nullifierHash, electionId, orgId, email, orgSlug, o
       setTimeout(() => onSuccess(data.token, data.faceAttributes), 800);
     } catch (err) {
       setError(getErrMsg(err));
-      setCapturedImage(null);
       setLoading(false);
     }
   }, [nullifierHash, electionId, orgId, email, onSuccess]);
@@ -174,176 +98,122 @@ function InlineFaceScanner({ nullifierHash, electionId, orgId, email, orgSlug, o
     }
   };
 
-  // Countdown trigger — safely awaits capture() outside setState
-  const captureAfterCountdownRef = useRef(false);
-  const triggerCapture = useCallback(() => {
-    if (loading) return;
+  const retryLiveness = () => {
+    setLivenessPassed(false);
+    setCapturedImage(null);
     setError('');
-    setCountdown(3);
-    captureAfterCountdownRef.current = false;
-    const iv = setInterval(() => {
-      setCountdown(prev => {
-        if (prev <= 1) {
-          clearInterval(iv);
-          captureAfterCountdownRef.current = true;
-          return -1;
-        }
-        return prev - 1;
-      });
-    }, 1000);
-  }, [loading]);
-
-  // Watch for capture trigger via ref to avoid calling async inside setState
-  useEffect(() => {
-    if (captureAfterCountdownRef.current) {
-      captureAfterCountdownRef.current = false;
-      capture();
-    }
-  });
-
-  useEffect(() => () => stopCamera(), []);
-
-  const checks = [
-    { label: 'Face Detected', ok: liveness.faceDetected },
-    { label: 'Centered in Oval', ok: liveness.centered },
-    { label: 'Optimal Lighting', ok: liveness.lighting },
-  ];
+    setScanDone(false);
+    setLoading(false);
+    setIsDuplicateFace(false);
+    setRequestStatus('idle');
+  };
 
   return (
     <div className="space-y-4">
-      {/* Camera viewport */}
-      <div className="relative w-full aspect-[4/3] bg-black rounded-xl overflow-hidden border border-hairline">
-        <video ref={videoRef} className="hidden" playsInline muted />
-        <canvas ref={canvasRef} width={640} height={480} className="w-full h-full object-cover" />
-
-        {!cameraActive && !capturedImage && (
-          <div className="absolute inset-0 flex flex-col items-center justify-center bg-black/80 gap-4">
-            <ScanFace size={48} className="text-primary opacity-60" />
-            <p className="text-white/70 text-sm">Camera not started</p>
-          </div>
-        )}
-
-        {capturedImage && (
-          <div className="absolute inset-0">
-            <img src={capturedImage} className="w-full h-full object-cover" alt="Captured" />
+      {!livenessPassed ? (
+        /* ─── LivenessGate: Multi-step local verification ─── */
+        <LivenessGate
+          onCapture={handleLivenessCapture}
+          onCancel={onCancel}
+        />
+      ) : (
+        /* ─── Post-liveness: Captured Image + AWS Processing Status ─── */
+        <>
+          {/* Captured image with status overlay */}
+          <div className="relative w-full aspect-[4/3] bg-black rounded-xl overflow-hidden border border-hairline">
+            {capturedImage && (
+              <img src={capturedImage} className="w-full h-full object-cover" alt="Captured" />
+            )}
             <div className="absolute inset-0 flex items-center justify-center bg-black/40">
-              {scanDone ? (
-                <div className="flex flex-col items-center gap-2">
-                  <CheckCircle2 size={48} className="text-green-400" />
-                  <p className="text-white font-semibold text-sm">Verified!</p>
-                </div>
-              ) : (
+              {loading && !scanDone ? (
                 <div className="flex flex-col items-center gap-2">
                   <Loader2 size={36} className="text-primary animate-spin" />
                   <p className="text-white/80 text-xs">{statusText}</p>
                 </div>
-              )}
+              ) : scanDone ? (
+                <div className="flex flex-col items-center gap-2">
+                  <CheckCircle2 size={48} className="text-green-400" />
+                  <p className="text-white font-semibold text-sm">Verified!</p>
+                </div>
+              ) : null}
             </div>
           </div>
-        )}
 
-        {countdown > 0 && (
-          <div className="absolute inset-0 flex items-center justify-center pointer-events-none">
-            <span className="text-white text-7xl font-black opacity-80">{countdown}</span>
-          </div>
-        )}
-
-        {/* Status bar */}
-        {cameraActive && !capturedImage && (
-          <div className="absolute bottom-0 left-0 right-0 bg-black/60 backdrop-blur-sm px-4 py-2">
-            <p className="text-white/80 text-xs text-center">{statusText}</p>
-          </div>
-        )}
-      </div>
-
-      {/* Liveness checks */}
-      {(cameraActive || scanDone) && (
-        <div className="grid grid-cols-3 gap-2">
-          {checks.map(c => (
-            <div key={c.label} className={`flex items-center gap-1.5 px-3 py-2 rounded-lg border text-xs font-medium transition-all ${
-              c.ok ? 'bg-green-50 border-green-200 text-green-700' : 'bg-surface-soft border-hairline text-muted'
-            }`}>
-              <CheckCircle2 size={11} className={c.ok ? 'text-green-500' : 'text-muted'} />
-              <span className="truncate">{c.label}</span>
-            </div>
-          ))}
-        </div>
-      )}
-
-      {error && (
-        <div className="bg-canvas border border-semantic-down text-semantic-down rounded-xl p-4 flex flex-col gap-3 text-xs">
-          <div className="flex items-start gap-2">
-            <AlertCircle size={14} className="shrink-0 mt-0.5" />
-            <span>{error}</span>
+          {/* Liveness checks summary */}
+          <div className="grid grid-cols-3 gap-2">
+            {[
+              { label: 'Face & Distance', ok: true },
+              { label: 'Background', ok: true },
+              { label: 'Environment', ok: true },
+            ].map(c => (
+              <div key={c.label} className={`flex items-center gap-1.5 px-3 py-2 rounded-lg border text-xs font-medium transition-all ${
+                'bg-green-50 border-green-200 text-green-700'
+              }`}>
+                <CheckCircle2 size={11} className="text-green-500" />
+                <span className="truncate">{c.label}</span>
+              </div>
+            ))}
           </div>
 
-          {isDuplicateFace && (
-            <div className="mt-2 pt-3 border-t border-red-100 flex flex-col gap-2">
-              <p className="text-body font-medium text-slate-600 dark:text-slate-300">
-                Are you an identical twin? You can request a manual twin verification override from the administrator to allow your vote.
-              </p>
-              {requestStatus === 'idle' && (
-                <button
-                  onClick={handleRequestTwinOverride}
-                  className="bg-primary hover:bg-primary-active text-white px-4 py-2 rounded-full font-semibold text-xs transition cursor-pointer w-fit"
-                >
-                  Request Twin Verification Override
-                </button>
-              )}
-              {requestStatus === 'submitting' && (
-                <div className="flex items-center gap-1.5 text-slate-500 font-semibold">
-                  <Loader2 size={12} className="animate-spin text-primary" /> Submitting request...
-                </div>
-              )}
-              {requestStatus === 'submitted' && (
-                <div className="text-green-600 font-semibold bg-green-50 border border-green-200 px-3 py-1.5 rounded-lg flex items-center gap-1.5">
-                  <CheckCircle2 size={13} className="text-green-500" />
-                  Twin Verification Request submitted successfully! Please contact your administrator.
-                </div>
-              )}
-              {requestStatus === 'error' && (
-                <div className="text-red-600 font-semibold">
-                  Failed to submit request. Please try again or contact support.
+          {/* Error Display */}
+          {error && (
+            <div className="bg-canvas border border-semantic-down text-semantic-down rounded-xl p-4 flex flex-col gap-3 text-xs">
+              <div className="flex items-start gap-2">
+                <AlertCircle size={14} className="shrink-0 mt-0.5" />
+                <span>{error}</span>
+              </div>
+
+              {isDuplicateFace && (
+                <div className="mt-2 pt-3 border-t border-red-100 flex flex-col gap-2">
+                  <p className="text-body font-medium text-slate-600 dark:text-slate-300">
+                    Are you an identical twin? You can request a manual twin verification override from the administrator to allow your vote.
+                  </p>
+                  {requestStatus === 'idle' && (
+                    <button
+                      onClick={handleRequestTwinOverride}
+                      className="bg-primary hover:bg-primary-active text-white px-4 py-2 rounded-full font-semibold text-xs transition cursor-pointer w-fit"
+                    >
+                      Request Twin Verification Override
+                    </button>
+                  )}
+                  {requestStatus === 'submitting' && (
+                    <div className="flex items-center gap-1.5 text-slate-500 font-semibold">
+                      <Loader2 size={12} className="animate-spin text-primary" /> Submitting request...
+                    </div>
+                  )}
+                  {requestStatus === 'submitted' && (
+                    <div className="text-green-600 font-semibold bg-green-50 border border-green-200 px-3 py-1.5 rounded-lg flex items-center gap-1.5">
+                      <CheckCircle2 size={13} className="text-green-500" />
+                      Twin Verification Request submitted successfully! Please contact your administrator.
+                    </div>
+                  )}
+                  {requestStatus === 'error' && (
+                    <div className="text-red-600 font-semibold">
+                      Failed to submit request. Please try again or contact support.
+                    </div>
+                  )}
                 </div>
               )}
             </div>
           )}
-        </div>
-      )}
 
-      {/* Action buttons */}
-      <div className="flex gap-3">
-        {!cameraActive && !capturedImage && (
-          <button onClick={startCamera}
-            className="flex-1 flex items-center justify-center gap-2 bg-primary hover:bg-primary-active text-white py-3 rounded-full font-semibold text-sm transition cursor-pointer">
-            <Camera size={16} /> Start Camera
-          </button>
-        )}
-        {cameraActive && !loading && countdown === -1 && (
-          <>
-            <button onClick={triggerCapture}
-              className="flex-1 flex items-center justify-center gap-2 bg-primary hover:bg-primary-active text-white py-3 rounded-full font-semibold text-sm transition cursor-pointer">
-              <ScanFace size={16} /> Capture &amp; Verify
-            </button>
-            <button onClick={stopCamera}
-              className="px-4 py-3 rounded-full border border-hairline bg-canvas text-body hover:text-ink text-sm font-medium transition cursor-pointer">
-              Cancel
-            </button>
-          </>
-        )}
-        {error && !cameraActive && (
-          <button onClick={startCamera}
-            className="flex-1 flex items-center justify-center gap-2 border border-hairline bg-canvas hover:bg-surface-soft text-ink py-3 rounded-full font-semibold text-sm transition cursor-pointer">
-            <RefreshCw size={14} /> Retry
-          </button>
-        )}
-        {!scanDone && (
-          <button onClick={onCancel}
-            className="px-4 py-3 rounded-full text-muted hover:text-ink text-xs font-medium transition cursor-pointer">
-            Back
-          </button>
-        )}
-      </div>
+          {/* Action buttons */}
+          <div className="flex gap-3">
+            {error && (
+              <button onClick={retryLiveness}
+                className="flex-1 flex items-center justify-center gap-2 border border-hairline bg-canvas hover:bg-surface-soft text-ink py-3 rounded-full font-semibold text-sm transition cursor-pointer">
+                <RefreshCw size={14} /> Retry Liveness Check
+              </button>
+            )}
+            {!scanDone && (
+              <button onClick={onCancel}
+                className="px-4 py-3 rounded-full text-muted hover:text-ink text-xs font-medium transition cursor-pointer">
+                Back
+              </button>
+            )}
+          </div>
+        </>
+      )}
     </div>
   );
 }

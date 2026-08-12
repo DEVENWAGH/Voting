@@ -299,7 +299,7 @@ function TwinOverridesPanel({ slug, electionId }) {
         <div className="text-center py-6 border border-dashed border-hairline rounded-xl bg-canvas space-y-3">
           <p className="text-body text-xs font-semibold">No twin override requests found for this election.</p>
           <p className="text-muted text-[11px] px-4">
-            If you believe requests exist but aren't showing, existing biometric records may predate election scoping.
+            If you believe requests exist but aren&apos;t showing, existing biometric records may predate election scoping.
             Use the sync button below to backfill missing data.
           </p>
           <button

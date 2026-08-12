@@ -3,6 +3,18 @@ import { useState, useRef, useEffect, Suspense, useCallback } from 'react';
 import { Camera, CheckCircle, AlertCircle, Loader2, RefreshCw, Shield, UserCheck, KeyRound } from 'lucide-react';
 import { ethers } from 'ethers';
 import { useSearchParams, useRouter } from 'next/navigation';
+import dynamic from 'next/dynamic';
+
+// Lazy-load LivenessGate to avoid bundling ML libs on initial page load
+const LivenessGate = dynamic(() => import('@/components/LivenessGate'), {
+  ssr: false,
+  loading: () => (
+    <div className="flex flex-col items-center justify-center p-8 gap-3">
+      <Loader2 size={28} className="text-indigo-500 animate-spin" />
+      <p className="text-slate-400 text-xs font-semibold">Loading Liveness Module...</p>
+    </div>
+  ),
+});
 
 export default function BiometricPage() {
   return (
@@ -33,6 +45,10 @@ function BiometricPageContent() {
   const searchParams = useSearchParams();
   const router = useRouter();
 
+  // ─── Liveness Gate State ─────────────────────────────────────────────
+  const [livenessPassed, setLivenessPassed] = useState(false);
+  const [capturedImage, setCapturedImage] = useState(null); // base64 from LivenessGate
+
   // Ref to track if automatic capture has been triggered in the current session
   const autoCapturedRef = useRef(false);
 
@@ -61,24 +77,16 @@ function BiometricPageContent() {
     } else {
       setOrgChecked(false);
       setSuccess(null);
+      setLivenessPassed(false);
+      setCapturedImage(null);
     }
   };
 
-  // Camera & Capture states
-  const [hasWebcam, setHasWebcam] = useState(true);
-  const [cameraActive, setCameraActive] = useState(false);
-  const [liveness, setLiveness] = useState({ faceDetected: false, centered: false, lighting: false });
-  const [countdown, setCountdown] = useState(-1);
-  const [loading, setLoading] = useState(false);
-  const [statusText, setStatusText] = useState('Align your face in the oval guide');
-  
   // Results
+  const [loading, setLoading] = useState(false);
+  const [statusText, setStatusText] = useState('');
   const [error, setError] = useState('');
   const [success, setSuccess] = useState(null);
-  
-  const videoRef = useRef(null);
-  const canvasRef = useRef(null);
-  const streamRef = useRef(null);
   
   // Lookup Voter and Organization by Email (and optionally Org Slug)
   const lookupVoter = useCallback(async () => {
@@ -126,54 +134,23 @@ function BiometricPageContent() {
     }
   }, [orgSlug, email, memberId, orgChecked, lookupVoter]);
 
-  // Start webcam
-  const startCamera = async () => {
-    setError('');
-    setSuccess(null);
-    autoCapturedRef.current = false;
-    try {
-      if (streamRef.current) {
-        streamRef.current.getTracks().forEach(track => track.stop());
-      }
-      
-      const stream = await navigator.mediaDevices.getUserMedia({
-        video: { width: 640, height: 480, facingMode: 'user' },
-        audio: false
-      });
-      
-      streamRef.current = stream;
-      if (videoRef.current) {
-        videoRef.current.srcObject = stream;
-        videoRef.current.play().catch(playErr => {
-          console.warn('Video play interrupted:', playErr);
-        });
-      }
-      setCameraActive(true);
-      setHasWebcam(true);
-      setStatusText('Align your face in the oval guide...');
-    } catch (err) {
-      console.error('Webcam access error:', err);
-      setHasWebcam(false);
-      setError('Webcam access denied. Please grant permissions and click retry.');
-    }
-  };
+  // ─── LivenessGate Callback ──────────────────────────────────────────
+  // Called when all 4 liveness steps pass and image is captured
+  const handleLivenessCapture = useCallback((base64Image) => {
+    setCapturedImage(base64Image);
+    setLivenessPassed(true);
+    // Auto-submit to AWS Rekognition
+    submitToAWS(base64Image);
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [orgId, memberId, mode, email, searchParams, nullifierHashParam, electionId]);
 
-  // Stop webcam
-  const stopCamera = () => {
-    if (streamRef.current) {
-      streamRef.current.getTracks().forEach(track => track.stop());
-      streamRef.current = null;
-    }
-    setCameraActive(false);
-  };
-
-  // Capture face landmarks and submit
-  const captureFace = useCallback(async () => {
+  // ─── Submit Captured Image to AWS Rekognition ───────────────────────
+  const submitToAWS = async (base64Image) => {
     setLoading(true);
-    setStatusText('Extracting zero-knowledge facial measurements...');
-    
+    setStatusText('Submitting to AWS Rekognition for verification...');
+
     try {
-      // 1. Get nullifier hash (either from search parameter directly or calculate it)
+      // 1. Get nullifier hash
       let nullifierHash = nullifierHashParam;
       if (!nullifierHash) {
         const secret = process.env.SERVER_IDENTITY_SECRET || 'dev-identity-secret-change-in-prod-12345';
@@ -181,9 +158,8 @@ function BiometricPageContent() {
           ethers.toUtf8Bytes(`${orgId}:${memberId.trim()}:${secret}`)
         );
       }
-      
+
       // 2. Generate simulated face ratios with tiny random deviation
-      // We keep ratios around a standard face coordinate to represent high matching accuracy
       const baseHeight = 220 + (Math.random() * 2 - 1);
       const landmarks = {
         faceHeight: baseHeight,
@@ -192,18 +168,6 @@ function BiometricPageContent() {
         mouthWidth: 68 + (Math.random() * 0.8 - 0.4),
         jawWidth: 158 + (Math.random() * 1.0 - 0.5),
       };
-
-      // Capture a clean video frame directly from video stream (without oval overlay/dots)
-      let base64Image = null;
-      const video = videoRef.current;
-      if (video) {
-        const tempCanvas = document.createElement('canvas');
-        tempCanvas.width = video.videoWidth || 640;
-        tempCanvas.height = video.videoHeight || 480;
-        const tempCtx = tempCanvas.getContext('2d');
-        tempCtx.drawImage(video, 0, 0, tempCanvas.width, tempCanvas.height);
-        base64Image = tempCanvas.toDataURL('image/jpeg', 0.85);
-      }
 
       // 3. Submit to backend API
       const endpoint = mode === 'register' ? '/api/biometric/register' : '/api/biometric/verify';
@@ -218,15 +182,13 @@ function BiometricPageContent() {
           electionId: electionId || undefined,
         })
       });
-      
+
       const data = await res.json();
-      
+
       if (!res.ok) {
         throw new Error(data.error || 'Biometric process failed.');
       }
 
-      stopCamera();
-      
       if (mode === 'register') {
         if (data.data?.token) {
           localStorage.setItem(`biometricToken_${orgId}_${email.toLowerCase().trim()}`, data.data.token);
@@ -249,7 +211,7 @@ function BiometricPageContent() {
       } else {
         // Save token to localStorage so voter page can auto-detect it
         localStorage.setItem(`biometricToken_${orgId}_${email.toLowerCase().trim()}`, data.token);
-        
+
         setSuccess({
           title: 'Face Verified!',
           desc: 'A secure, short-lived biometric session token (JWT) has been issued for your vote. The voting portal will automatically detect this token.',
@@ -263,153 +225,30 @@ function BiometricPageContent() {
           setStatusText('Verification successful! Redirecting back to the voting portal...');
           setTimeout(() => {
             window.location.href = redirectUrl;
-          }, 2500); // Increased to 2.5 seconds so they can see the detected details
+          }, 2500);
         }
       }
     } catch (err) {
       setError(err.message);
-      stopCamera(); // Stop camera on error to prevent infinite restart loop
     } finally {
       setLoading(false);
     }
-  }, [orgId, memberId, mode, email, searchParams, nullifierHashParam]);
+  };
 
-  // Trigger Capture Countdown
-  const triggerCapture = useCallback(() => {
-    if (loading) return;
+  // Handle cancel from LivenessGate
+  const handleLivenessCancel = () => {
+    setLivenessPassed(false);
+    setCapturedImage(null);
+    setOrgChecked(false);
+  };
+
+  // Retry liveness after error
+  const retryLiveness = () => {
+    setLivenessPassed(false);
+    setCapturedImage(null);
     setError('');
-    setCountdown(3);
-    
-    const interval = setInterval(() => {
-      setCountdown(prev => {
-        if (prev <= 1) {
-          clearInterval(interval);
-          captureFace();
-          return -1;
-        }
-        return prev - 1;
-      });
-    }, 1000);
-  }, [loading, captureFace]);
-
-  // Cleanup on unmount
-  useEffect(() => {
-    return () => {
-      if (streamRef.current) {
-        streamRef.current.getTracks().forEach(track => track.stop());
-      }
-    };
-  }, []);
-
-  // Simulate Face Landmarks Extraction & Canvas Overlay
-  useEffect(() => {
-    if (!cameraActive) return;
-    
-    let active = true;
-    const canvas = canvasRef.current;
-    const video = videoRef.current;
-    
-    if (!canvas || !video) return;
-    const ctx = canvas.getContext('2d');
-    
-    const drawScan = () => {
-      if (!active || !video || !canvas) return;
-      
-      ctx.clearRect(0, 0, canvas.width, canvas.height);
-      
-      // Draw video frame to canvas
-      ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
-      
-      // Face Guide Oval
-      const centerX = canvas.width / 2;
-      const centerY = canvas.height / 2;
-      const radiusX = 110;
-      const radiusY = 150;
-      
-      // Overlay dark background outside the oval
-      ctx.fillStyle = 'rgba(2, 6, 23, 0.65)';
-      ctx.fillRect(0, 0, canvas.width, canvas.height);
-      
-      ctx.save();
-      ctx.globalCompositeOperation = 'destination-out';
-      ctx.fillStyle = '#000';
-      ctx.beginPath();
-      ctx.ellipse(centerX, centerY, radiusX, radiusY, 0, 0, Math.PI * 2);
-      ctx.fill();
-      ctx.restore();
-      
-      // Draw oval border
-      ctx.strokeStyle = liveness.faceDetected && liveness.centered ? '#10b981' : '#6366f1';
-      ctx.lineWidth = 3;
-      ctx.beginPath();
-      ctx.ellipse(centerX, centerY, radiusX, radiusY, 0, 0, Math.PI * 2);
-      ctx.stroke();
-
-      // Simulated scanning line
-      if (!loading && countdown === -1) {
-        const time = Date.now() * 0.003;
-        const scanY = centerY + Math.sin(time) * radiusY;
-        
-        ctx.save();
-        ctx.beginPath();
-        ctx.ellipse(centerX, centerY, radiusX, radiusY, 0, 0, Math.PI * 2);
-        ctx.clip();
-        
-        ctx.strokeStyle = 'rgba(99, 102, 241, 0.6)';
-        ctx.lineWidth = 2;
-        ctx.shadowColor = '#6366f1';
-        ctx.shadowBlur = 10;
-        ctx.beginPath();
-        ctx.moveTo(centerX - radiusX, scanY);
-        ctx.lineTo(centerX + radiusX, scanY);
-        ctx.stroke();
-        ctx.restore();
-      }
-      
-      // Simulate landmark points inside face
-      if (liveness.faceDetected) {
-        ctx.fillStyle = '#10b981';
-        ctx.shadowColor = '#10b981';
-        ctx.shadowBlur = 4;
-        
-        const points = [
-          { x: centerX - 35, y: centerY - 30 }, // Left eye
-          { x: centerX + 35, y: centerY - 30 }, // Right eye
-          { x: centerX, y: centerY + 10 },      // Nose bridge
-          { x: centerX, y: centerY + 25 },      // Nose tip
-          { x: centerX - 25, y: centerY + 60 }, // Left mouth corner
-          { x: centerX + 25, y: centerY + 60 }, // Right mouth corner
-          { x: centerX - 65, y: centerY + 80 }, // Left jaw
-          { x: centerX + 65, y: centerY + 80 }, // Right jaw
-          { x: centerX, y: centerY + 115 }      // Chin
-        ];
-        
-        points.forEach(pt => {
-          ctx.beginPath();
-          ctx.arc(pt.x, pt.y, 4, 0, Math.PI * 2);
-          ctx.fill();
-        });
-        ctx.shadowBlur = 0;
-      }
-      
-      requestAnimationFrame(drawScan);
-    };
-    
-    // Simulate Face Liveness Checking
-    const livenessTimer = setInterval(() => {
-      setLiveness({ faceDetected: true, centered: true, lighting: true });
-      setStatusText('Face locks aligned. Liveness verified.');
-    }, 1000);
-    
-    requestAnimationFrame(drawScan);
-    
-    return () => {
-      active = false;
-      clearInterval(livenessTimer);
-    };
-  }, [cameraActive, liveness.faceDetected, liveness.centered, loading, countdown, triggerCapture]);
-
-
+    setSuccess(null);
+  };
 
   return (
     <div className="min-h-screen bg-[#020617] text-white flex flex-col font-sans">
@@ -461,54 +300,44 @@ function BiometricPageContent() {
             </div>
           </div>
         ) : (
-          /* Step 2: Camera Capture / scanning screen */
+          /* Step 2: Liveness Gate → Camera Capture / AWS Verification */
           <div className="grid grid-cols-1 md:grid-cols-12 gap-8 w-full">
-            {/* Left Column: Camera View */}
+            {/* Left Column: Liveness Gate or Captured Result */}
             <div className="md:col-span-7 flex flex-col items-center justify-center">
-              <div className="relative border border-slate-800 rounded-2xl overflow-hidden aspect-video w-full max-w-lg bg-slate-950 shadow-2xl flex items-center justify-center">
-                
-                {/* Simulated/Native camera feed */}
-                <video ref={videoRef} playsInline muted style={{ display: 'none' }} width="640" height="480" />
-                <canvas ref={canvasRef} width="640" height="480" className="w-full h-full object-cover" />
-
-                {/* Oval overlay instructions when not active */}
-                {!cameraActive && (
-                  <div className="absolute inset-0 bg-slate-950 flex flex-col items-center justify-center p-6 text-center">
-                    <Camera size={48} className="text-indigo-400 mb-4 animate-pulse" />
-                    <h3 className="text-lg font-black mb-1">Camera Inactive</h3>
-                    <p className="text-slate-400 text-xs max-w-xs mb-4">We need camera access to capture zero-knowledge landmarks.</p>
-                    <button onClick={startCamera} className="bg-indigo-600 hover:bg-indigo-500 text-white px-5 py-2.5 rounded-xl font-bold text-xs flex items-center gap-2 transition cursor-pointer">
-                      <Camera size={14} /> {error ? 'Recapture / Try Again' : 'Enable Camera'}
-                    </button>
+              {!livenessPassed ? (
+                /* ─── LivenessGate: Multi-step local verification ─── */
+                <LivenessGate
+                  onCapture={handleLivenessCapture}
+                  onCancel={handleLivenessCancel}
+                />
+              ) : (
+                /* ─── Captured Image + AWS Processing Status ─── */
+                <div className="relative border border-slate-800 rounded-2xl overflow-hidden w-full max-w-lg bg-slate-950 shadow-2xl">
+                  {capturedImage && (
+                    <img src={capturedImage} alt="Captured" className="w-full aspect-[4/3] object-cover" />
+                  )}
+                  <div className="absolute inset-0 bg-black/40 flex flex-col items-center justify-center">
+                    {loading ? (
+                      <>
+                        <Loader2 size={36} className="text-indigo-400 animate-spin mb-2" />
+                        <p className="text-white text-xs font-bold uppercase tracking-wider">{statusText}</p>
+                      </>
+                    ) : success ? (
+                      <>
+                        <CheckCircle size={48} className="text-emerald-400 mb-2" />
+                        <p className="text-white font-bold text-sm">Verification Complete</p>
+                      </>
+                    ) : error ? (
+                      <>
+                        <AlertCircle size={36} className="text-red-400 mb-2" />
+                        <p className="text-red-300 text-xs font-semibold text-center px-4">{error}</p>
+                        <button onClick={retryLiveness}
+                          className="mt-3 bg-indigo-600 hover:bg-indigo-500 text-white px-4 py-2 rounded-xl text-xs font-bold transition cursor-pointer flex items-center gap-1.5">
+                          <RefreshCw size={12} /> Retry Liveness Check
+                        </button>
+                      </>
+                    ) : null}
                   </div>
-                )}
-
-                {/* Countdown Overlay */}
-                {countdown > -1 && (
-                  <div className="absolute inset-0 bg-black/60 flex items-center justify-center backdrop-blur-sm">
-                    <div className="text-7xl font-black text-white scale-up-animation">{countdown}</div>
-                  </div>
-                )}
-
-                {/* Capturing flash effect */}
-                {loading && (
-                  <div className="absolute inset-0 bg-white/10 animate-pulse flex flex-col items-center justify-center backdrop-blur-sm">
-                    <Loader2 size={36} className="text-indigo-400 animate-spin mb-2" />
-                    <p className="text-xs font-bold text-white uppercase tracking-wider">Analyzing face landmarks...</p>
-                  </div>
-                )}
-              </div>
-
-              {cameraActive && (
-                <div className="mt-4 flex gap-3">
-                  <button onClick={triggerCapture} disabled={loading}
-                    className="bg-indigo-600 hover:bg-indigo-500 disabled:opacity-50 text-white font-bold px-6 py-3 rounded-xl text-sm flex items-center gap-2 transition cursor-pointer shadow-lg shadow-indigo-600/20">
-                    <Camera size={16} /> Capture Landmark Snapshot
-                  </button>
-                  <button onClick={stopCamera} disabled={loading}
-                    className="bg-slate-900 hover:bg-slate-800 text-slate-400 hover:text-white px-4 py-3 rounded-xl text-xs font-bold transition cursor-pointer border border-slate-800">
-                    Close Camera
-                  </button>
                 </div>
               )}
             </div>
@@ -574,7 +403,7 @@ function BiometricPageContent() {
                         className="bg-indigo-600 hover:bg-indigo-500 text-white font-bold px-4 py-2.5 rounded-lg text-xs transition cursor-pointer">
                         Complete & Return
                       </button>
-                      <button onClick={startCamera}
+                      <button onClick={retryLiveness}
                         className="bg-slate-900 border border-slate-800 text-slate-400 hover:text-white px-3 py-2.5 rounded-lg text-xs font-bold transition flex items-center gap-1 cursor-pointer">
                         <RefreshCw size={12} /> Scan Again
                       </button>
@@ -586,22 +415,28 @@ function BiometricPageContent() {
                     {/* Status feedback */}
                     <div className="flex gap-3 items-center">
                       <Loader2 size={16} className={`text-indigo-400 animate-spin ${loading ? 'opacity-100' : 'opacity-0'}`} />
-                      <span className="text-xs font-semibold text-slate-300">{statusText}</span>
+                      <span className="text-xs font-semibold text-slate-300">
+                        {loading ? statusText : livenessPassed ? 'Liveness verified. Processing...' : 'Complete all liveness checks to proceed'}
+                      </span>
                     </div>
 
-                    {/* Liveness indicators */}
+                    {/* Liveness step indicators */}
                     <div className="space-y-3 bg-[#090d1f] p-4 rounded-xl border border-slate-850">
                       <div className="flex items-center justify-between text-xs">
-                        <span className="text-slate-400 font-semibold">Face Detected</span>
-                        <span className={`h-2.5 w-2.5 rounded-full ${liveness.faceDetected ? 'bg-emerald-500' : 'bg-red-500'}`} />
+                        <span className="text-slate-400 font-semibold">Face Detected & Distance OK</span>
+                        <span className={`h-2.5 w-2.5 rounded-full ${livenessPassed ? 'bg-emerald-500' : 'bg-amber-500 animate-pulse'}`} />
                       </div>
                       <div className="flex items-center justify-between text-xs">
-                        <span className="text-slate-400 font-semibold">Centered in Oval</span>
-                        <span className={`h-2.5 w-2.5 rounded-full ${liveness.centered ? 'bg-emerald-500' : 'bg-red-500'}`} />
+                        <span className="text-slate-400 font-semibold">Plain Background</span>
+                        <span className={`h-2.5 w-2.5 rounded-full ${livenessPassed ? 'bg-emerald-500' : 'bg-slate-600'}`} />
                       </div>
                       <div className="flex items-center justify-between text-xs">
-                        <span className="text-slate-400 font-semibold">Optimal Lighting</span>
-                        <span className={`h-2.5 w-2.5 rounded-full ${liveness.lighting ? 'bg-emerald-500' : 'bg-red-500'}`} />
+                        <span className="text-slate-400 font-semibold">Environment Clear</span>
+                        <span className={`h-2.5 w-2.5 rounded-full ${livenessPassed ? 'bg-emerald-500' : 'bg-slate-600'}`} />
+                      </div>
+                      <div className="flex items-center justify-between text-xs">
+                        <span className="text-slate-400 font-semibold">AWS Rekognition</span>
+                        <span className={`h-2.5 w-2.5 rounded-full ${success ? 'bg-emerald-500' : loading ? 'bg-indigo-500 animate-pulse' : 'bg-slate-600'}`} />
                       </div>
                     </div>
 
@@ -613,7 +448,7 @@ function BiometricPageContent() {
 
                     <div className="pt-2 text-[10px] text-slate-500 flex gap-1.5 items-start">
                       <Shield size={14} className="text-indigo-400/80 shrink-0 mt-0.5" />
-                      <p><strong>Privacy note:</strong> No face photos or video feeds are sent to the server. Facial verification compiles geometry landmarks into an encrypted cryptographic hash locally in your browser.</p>
+                      <p><strong>Privacy note:</strong> Liveness & environment checks run locally in your browser. Only the final face photo is sent to AWS Rekognition for identity matching.</p>
                     </div>
                   </div>
                 )}
