@@ -20,6 +20,7 @@ const COLLECTIONS = [
   "relaytransactions",
   "voterregistrations",
   "emailotps",
+  "biometrichashes",
 ];
 
 async function main() {

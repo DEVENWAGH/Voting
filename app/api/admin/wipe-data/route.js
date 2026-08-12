@@ -15,6 +15,7 @@ const COLLECTIONS = [
   "relaytransactions",
   "voterregistrations",
   "emailotps",
+  "biometrichashes",
 ];
 
 async function isGuardianAddress(address) {

@@ -13,11 +13,15 @@ import Link from 'next/link';
 import { ethers } from 'ethers';
 import ThemeToggle from '@/components/ThemeToggle';
 
+import contractArtifact from '@/lib/contracts/VotingV3.json';
+
 // Read-only contract fetching (no wallet required)
-async function getReadContract() {
-  const abi = (await import('@/lib/contracts/VotingV1.json', { assert: { type: 'json' } })).default.abi;
-  const provider = new ethers.JsonRpcProvider(process.env.NEXT_PUBLIC_RPC_URL || 'http://127.0.0.1:8545');
-  return new ethers.Contract(process.env.NEXT_PUBLIC_CONTRACT_ADDRESS, abi, provider);
+function getReadContract() {
+  const address = process.env.NEXT_PUBLIC_CONTRACT_ADDRESS;
+  const rpcUrl = process.env.NEXT_PUBLIC_RPC_URL || 'http://127.0.0.1:8545';
+  if (!address) return null;
+  const provider = new ethers.JsonRpcProvider(rpcUrl);
+  return new ethers.Contract(address, contractArtifact.abi, provider);
 }
 
 export default function PublicElectionDetailPage() {
@@ -35,29 +39,56 @@ export default function PublicElectionDetailPage() {
       setLoading(true);
       setError('');
       
-      const contract = await getReadContract();
-      const electionRaw = await contract.getElection(id);
-      const e = serializeElection(electionRaw);
-      setElection(e);
+      // 1. Fetch from API endpoint first
+      const apiRes = await fetch(`/api/elections/${id}`);
+      const apiData = await apiRes.json();
+      
+      let currentElection = null;
+      let currentCandidates = [];
 
-      if (e.phase === 2) {
-        const resRaw = await contract.getElectionResults(id);
-        const sortedRes = resRaw.map(serializeCandidate).sort((a, b) => b.voteCount - a.voteCount);
-        setResults(sortedRes);
-        
+      if (apiRes.ok && apiData.data) {
+        currentElection = apiData.data;
+        currentCandidates = apiData.data.candidates || [];
+        setElection(currentElection);
+        setCandidates(currentCandidates);
+      }
+
+      // 2. Try fetching live contract details (if on-chain ID present)
+      const targetId = currentElection?.electionId || id;
+      const contract = getReadContract();
+
+      if (contract && targetId && targetId.startsWith('0x')) {
         try {
-          const winnerRaw = await contract.getWinner(id);
-          setWinner(serializeCandidate(winnerRaw));
-        } catch (we) {
-          console.warn('Could not determine winner:', we);
+          const electionRaw = await contract.getElection(targetId);
+          const e = serializeElection(electionRaw);
+          setElection(prev => ({ ...prev, ...e }));
+
+          if (e.phase === 2) {
+            const resRaw = await contract.getElectionResults(targetId);
+            const sortedRes = resRaw.map(serializeCandidate).sort((a, b) => b.voteCount - a.voteCount);
+            setResults(sortedRes);
+            
+            try {
+              const winnerRaw = await contract.getWinner(targetId);
+              setWinner(serializeCandidate(winnerRaw));
+            } catch (we) {
+              console.warn('Could not determine winner:', we);
+            }
+          } else {
+            const cands = await contract.getCandidates(targetId);
+            setCandidates(cands.map(serializeCandidate));
+          }
+        } catch (chainErr) {
+          console.warn('[elections/[id]] Contract read warning:', chainErr.message);
         }
-      } else {
-        const cands = await contract.getCandidates(id);
-        setCandidates(cands.map(serializeCandidate));
+      }
+
+      if (!currentElection && !contract) {
+        throw new Error('Election not found');
       }
     } catch (err) {
       console.error(err);
-      setError('Failed to load election details. ID may be invalid or blockchain node is unreachable.');
+      setError('Failed to load election details. The election ID may be invalid or cleared from database/blockchain.');
     } finally {
       setLoading(false);
     }

@@ -16,6 +16,8 @@
     "deploy:v2-local": "hardhat run scripts/deployV2Impl.js --network localhost",
     "deploy:v2-sepolia": "hardhat run scripts/deployV2Impl.js --network sepolia",
     "vanish": "node scripts/vanish.js",
+    "db:reset": "node scripts/reset-mongodb.js",
+    "dev:clean": "yarn db:reset && yarn dev",
     "db:start": "docker compose up -d",
     "db:stop": "docker compose down",
     "test": "mocha test/rateLimit.test.js test/preflightCache.test.js test/biometric.test.js --timeout 10000",

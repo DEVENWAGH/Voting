@@ -72,6 +72,26 @@ function ApprovalsTab({ account }) {
     setActioning(null);
   };
 
+  const handleWipeData = async () => {
+    if (!window.confirm("Are you sure you want to wipe all election and voter MongoDB data?")) return;
+    setMsg(null);
+    setLoading(true);
+    try {
+      const r = await fetch('/api/admin/wipe-data', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ guardianAddress: account, confirm: true }),
+      });
+      const d = await r.json();
+      if (!r.ok) throw new Error(d.error);
+      setMsg({ type: 'success', text: d.message || 'Database wiped successfully.' });
+      load();
+    } catch (e) {
+      setMsg({ type: 'error', text: e.message });
+      setLoading(false);
+    }
+  };
+
   return (
     <div className="space-y-6">
       <div className="flex items-center justify-between border-b border-hairline pb-4">
@@ -79,9 +99,14 @@ function ApprovalsTab({ account }) {
           <h3 className="text-lg font-semibold text-ink">Pending Approvals</h3>
           <p className="text-xs text-body mt-0.5">Guardians must co-sign requests to transition elections live.</p>
         </div>
-        <button onClick={load} className="flex items-center gap-1.5 text-xs text-body hover:text-ink border border-hairline px-3 py-1.5 rounded-full bg-canvas cursor-pointer">
-          <RefreshCw size={12} /> Sync
-        </button>
+        <div className="flex items-center gap-2">
+          <button onClick={handleWipeData} title="Wipe all election data" className="flex items-center gap-1.5 text-xs text-red-600 hover:text-red-700 border border-red-200 px-3 py-1.5 rounded-full bg-red-50/50 hover:bg-red-100/50 cursor-pointer">
+            <Trash2 size={12} /> Wipe Data
+          </button>
+          <button onClick={load} className="flex items-center gap-1.5 text-xs text-body hover:text-ink border border-hairline px-3 py-1.5 rounded-full bg-canvas cursor-pointer">
+            <RefreshCw size={12} /> Sync
+          </button>
+        </div>
       </div>
 
       {msg && <Toast type={msg.type} msg={msg.text} />}

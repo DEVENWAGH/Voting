@@ -3,17 +3,23 @@ import connectDB from '@/lib/db';
 import Election from '@/lib/models/Election';
 import Candidate from '@/lib/models/Candidate';
 
+import mongoose from 'mongoose';
+
 // GET /api/elections/:id  — single election with its candidates
 export async function GET(request, { params }) {
   try {
     await connectDB();
     const { id } = await params;
 
-    const election = await Election.findOne({ electionId: id }).lean();
+    const isObjId = mongoose.Types.ObjectId.isValid(id);
+    const election = await Election.findOne({
+      $or: [{ electionId: id }, ...(isObjId ? [{ _id: id }] : [])]
+    }).lean();
+
     if (!election)
       return NextResponse.json({ success: false, error: 'Election not found' }, { status: 404 });
 
-    const candidates = await Candidate.find({ electionId: id })
+    const candidates = await Candidate.find({ electionId: election.electionId })
       .sort({ candidateId: 1 })
       .lean();
 

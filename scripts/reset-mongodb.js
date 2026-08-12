@@ -33,8 +33,17 @@ async function main() {
   const db = mongoose.connection.db;
 
   const collections = votersOnly
-    ? ['voters']
-    : ['elections', 'voters', 'candidates', 'voteactivities', 'relaytransactions'];
+    ? ['voters', 'voterregistrations', 'biometrichashes']
+    : [
+        'elections',
+        'voters',
+        'candidates',
+        'voteactivities',
+        'relaytransactions',
+        'voterregistrations',
+        'emailotps',
+        'biometrichashes'
+      ];
 
   for (const name of collections) {
     try {
@@ -55,14 +64,16 @@ async function main() {
     }
   }
 
-  // Drop stale indexes that might reference old Number-type electionId
+  // Drop stale indexes that might reference old schema/electionIds/hashes
   if (!dryRun && !votersOnly) {
-    try {
-      const voterCol = db.collection('voters');
-      await voterCol.dropIndexes();
-      console.log('\n  ✅ Dropped old voter indexes (will be recreated on next app start)');
-    } catch (err) {
-      console.log('  ⚠️  Could not drop voter indexes:', err.message);
+    for (const colName of ['voters', 'biometrichashes']) {
+      try {
+        const col = db.collection(colName);
+        await col.dropIndexes();
+        console.log(`  ✅ Dropped old ${colName} indexes (will be recreated on next app start)`);
+      } catch (err) {
+        console.log(`  ⚠️  Could not drop ${colName} indexes:`, err.message);
+      }
     }
   }
 

@@ -8,18 +8,15 @@ import connectDB from '@/lib/db';
 import Election from '@/lib/models/Election';
 import Organization from '@/lib/models/Organization';
 
-async function getReadContract() {
-  const abi = (
-    await import('@/lib/contracts/VotingV1.json', { assert: { type: 'json' } })
-  ).default.abi;
+import contractArtifact from '@/lib/contracts/VotingV3.json';
+
+function getReadContract() {
+  const address = process.env.NEXT_PUBLIC_CONTRACT_ADDRESS;
+  if (!address) return null;
   const provider = new ethers.JsonRpcProvider(
     process.env.RPC_URL || 'http://127.0.0.1:8545',
   );
-  return new ethers.Contract(
-    process.env.NEXT_PUBLIC_CONTRACT_ADDRESS,
-    abi,
-    provider,
-  );
+  return new ethers.Contract(address, contractArtifact.abi, provider);
 }
 
 export async function GET() {

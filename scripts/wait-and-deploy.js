@@ -47,7 +47,21 @@ async function waitForNode() {
 async function main() {
   await waitForNode();
 
-  console.log('🚀 Deploying contract...\n');
+  if (process.env.SKIP_DB_RESET === 'true' || process.env.SKIP_DB_RESET === '1') {
+    console.log('⏭️  SKIP_DB_RESET is set — skipping automatic MongoDB reset.');
+  } else {
+    console.log('🧹 Auto-resetting local MongoDB data to sync with fresh Hardhat node...\n');
+    try {
+      execSync('node scripts/reset-mongodb.js', {
+        stdio: 'inherit',
+        cwd: process.cwd(),
+      });
+    } catch {
+      console.warn('⚠️  MongoDB auto-reset failed or skipped (check database connection).');
+    }
+  }
+
+  console.log('\n🚀 Deploying contract...\n');
   try {
     execSync('npx hardhat run scripts/deployProxy.js --network localhost', {
       stdio: 'inherit',
